@@ -9,6 +9,7 @@
 /*  OPTION(opt,		var_name,	default,	set_value_to) */
 #define STATS_PRINT_OPTIONS                                                    \
 	OPTION('J', json, false, true)                                         \
+	OPTION('B', both, false, true)                                         \
 	OPTION('g', general, true, false)                                      \
 	OPTION('m', merged, config_stats, false)                               \
 	OPTION('d', destroyed, config_stats, false)                            \

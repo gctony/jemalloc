@@ -2177,6 +2177,26 @@ stats_print_helper(emitter_t *emitter, bool merged, bool destroyed,
 	}
 }
 
+static void
+stats_emit(emitter_t *emitter, bool general, bool merged, bool destroyed,
+    bool unmerged, bool bins, bool large, bool mutex, bool extents, bool hpa) {
+	emitter_begin(emitter);
+	emitter_table_printf(emitter, "___ Begin jemalloc statistics ___\n");
+	emitter_json_object_kv_begin(emitter, "jemalloc");
+
+	if (general) {
+		stats_general_print(emitter);
+	}
+	if (config_stats) {
+		stats_print_helper(emitter, merged, destroyed, unmerged, bins,
+		    large, mutex, extents, hpa);
+	}
+
+	emitter_json_object_end(emitter); /* Closes the "jemalloc" dict. */
+	emitter_table_printf(emitter, "--- End jemalloc statistics ---\n");
+	emitter_end(emitter);
+}
+
 void
 stats_print(write_cb_t *write_cb, void *cbopaque, const char *opts) {
 	int      err;
@@ -2225,24 +2245,19 @@ stats_print(write_cb_t *write_cb, void *cbopaque, const char *opts) {
 	}
 
 	emitter_t emitter;
-	emitter_init(&emitter,
-	    json ? emitter_output_json_compact : emitter_output_table, write_cb,
-	    cbopaque);
-	emitter_begin(&emitter);
-	emitter_table_printf(&emitter, "___ Begin jemalloc statistics ___\n");
-	emitter_json_object_kv_begin(&emitter, "jemalloc");
-
-	if (general) {
-		stats_general_print(&emitter);
-	}
-	if (config_stats) {
-		stats_print_helper(&emitter, merged, destroyed, unmerged, bins,
+	if (!json || both) {
+		emitter_init(
+		    &emitter, emitter_output_table, write_cb, cbopaque);
+		stats_emit(&emitter, general, merged, destroyed, unmerged, bins,
 		    large, mutex, extents, hpa);
 	}
 
-	emitter_json_object_end(&emitter); /* Closes the "jemalloc" dict. */
-	emitter_table_printf(&emitter, "--- End jemalloc statistics ---\n");
-	emitter_end(&emitter);
+	if (json || both) {
+		emitter_init(
+		    &emitter, emitter_output_json_compact, write_cb, cbopaque);
+		stats_emit(&emitter, general, merged, destroyed, unmerged, bins,
+		    large, mutex, extents, hpa);
+	}
 }
 
 static uint64_t
