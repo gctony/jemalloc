@@ -59,7 +59,13 @@ get_lg_page_size() {
 #define HUGEPAGE_MAX_EXPECTED_SIZE ((size_t)(16U << 20))
 
 #if LG_HUGEPAGE != 0
-#	define HUGEPAGE_PAGES (HUGEPAGE / PAGE)
+#	ifdef DYNAMIC_PAGE_SIZE
+#		define HUGEPAGE_PAGES (HUGEPAGE / get_page_size())
+#		define HUGEPAGE_PAGES_MAX (HUGEPAGE / MIN_PAGE)
+#	else /* DYNAMIC_PAGE_SIZE */
+#		define HUGEPAGE_PAGES (HUGEPAGE / PAGE)
+#		define HUGEPAGE_PAGES_MAX HUGEPAGE_PAGES
+#	endif /* DYNAMIC_PAGE_SIZE */
 #else
 /*
  * It's convenient to define arrays (or bitmaps) of HUGEPAGE_PAGES lengths.  If
@@ -69,6 +75,7 @@ get_lg_page_size() {
  * hpa_supported() returns false in this case.
  */
 #	define HUGEPAGE_PAGES 1
+#	define HUGEPAGE_PAGES_MAX HUGEPAGE_PAGES
 #endif
 
 /* Return the huge page base address for the huge page containing address a. */

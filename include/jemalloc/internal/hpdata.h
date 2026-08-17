@@ -113,7 +113,7 @@ struct hpdata_s {
 	size_t h_nactive;
 
 	/* A bitmap with bits set in the active pages. */
-	fb_group_t active_pages[FB_NGROUPS(HUGEPAGE_PAGES)];
+	fb_group_t active_pages[FB_NGROUPS(HUGEPAGE_PAGES_MAX)];
 
 	/*
 	 * Number of dirty or active pages, and a bitmap tracking them.  One
@@ -123,7 +123,7 @@ struct hpdata_s {
 	size_t h_ntouched;
 
 	/* The touched pages (using the same definition as above). */
-	fb_group_t touched_pages[FB_NGROUPS(HUGEPAGE_PAGES)];
+	fb_group_t touched_pages[FB_NGROUPS(HUGEPAGE_PAGES_MAX)];
 
 	/* Time when this extent (hpdata) becomes eligible for purging */
 	nstime_t h_time_purge_allowed;
@@ -138,8 +138,7 @@ TYPED_LIST(hpdata_hugify_list, hpdata_t, ql_link_hugify)
 
 ph_proto(, hpdata_age_heap, hpdata_t)
 
-static inline void *
-hpdata_addr_get(const hpdata_t *hpdata) {
+    static inline void *hpdata_addr_get(const hpdata_t *hpdata) {
 	return hpdata->h_address;
 }
 
@@ -306,6 +305,7 @@ hpdata_ndirty_get(const hpdata_t *hpdata) {
 
 static inline size_t
 hpdata_nretained_get(const hpdata_t *hpdata) {
+	assert(hpdata->h_ntouched <= HUGEPAGE_PAGES);
 	return HUGEPAGE_PAGES - hpdata->h_ntouched;
 }
 
@@ -420,12 +420,13 @@ hpdata_empty(const hpdata_t *hpdata) {
 
 static inline bool
 hpdata_full(const hpdata_t *hpdata) {
+	assert(hpdata->h_nactive <= HUGEPAGE_PAGES);
 	return hpdata->h_nactive == HUGEPAGE_PAGES;
 }
 
 void hpdata_init(hpdata_t *hpdata, void *addr, uint64_t age, bool is_huge);
 
-void  hpdata_unreserve(hpdata_t *hpdata, void *addr, size_t sz);
+void hpdata_unreserve(hpdata_t *hpdata, void *addr, size_t sz);
 
 /*
  * For buffering extent allocations we will perform out of
@@ -490,7 +491,7 @@ typedef struct hpdata_purge_state_s hpdata_purge_state_t;
 struct hpdata_purge_state_s {
 	size_t     npurged;
 	size_t     ndirty_to_purge;
-	fb_group_t to_purge[FB_NGROUPS(HUGEPAGE_PAGES)];
+	fb_group_t to_purge[FB_NGROUPS(HUGEPAGE_PAGES_MAX)];
 	size_t     next_purge_search_begin;
 };
 
