@@ -522,15 +522,6 @@ bool
 malloc_init_hard(void) {
 	tsd_t *tsd;
 
-	assert(TCACHE_MAXCLASS_LIMIT <= USIZE_GROW_SLOW_THRESHOLD);
-	assert(SC_LOOKUP_MAXCLASS <= USIZE_GROW_SLOW_THRESHOLD);
-	/*
-	 * This asserts an extreme case where TINY_MAXCLASS is larger
-	 * than LARGE_MINCLASS.  It could only happen if some constants
-	 * are configured miserably wrong.
-	 */
-	assert(SC_NTINY == 0 || SC_LG_TINY_MAXCLASS <= SC_LG_LARGE_MINCLASS);
-
 #if !OS_MUTEX_HAS_STATIC_INIT
 	_init_init_lock();
 #endif
@@ -548,6 +539,17 @@ malloc_init_hard(void) {
 	    && malloc_init_hard_a0_locked()) {
 		UNLOCK_RETURN(TSDN_NULL, true, false)
 	}
+
+	/* TODO: runtime checks on bounds */
+	assert(TCACHE_MAXCLASS_LIMIT <= USIZE_GROW_SLOW_THRESHOLD);
+	assert(SC_LOOKUP_MAXCLASS <= USIZE_GROW_SLOW_THRESHOLD);
+
+	/*
+	 * This asserts an extreme case where TINY_MAXCLASS is larger
+	 * than LARGE_MINCLASS.  It could only happen if some constants
+	 * are configured miserably wrong.
+	 */
+	assert(SC_NTINY == 0 || SC_LG_TINY_MAXCLASS <= SC_LG_LARGE_MINCLASS);
 
 	malloc_mutex_unlock(TSDN_NULL, &init_lock);
 	/* Recursive allocation relies on functional tsd. */

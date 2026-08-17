@@ -302,5 +302,11 @@ sc_data_update_slab_size(sc_data_t *data, size_t begin, size_t end, int pgs) {
 
 void
 sc_boot(sc_data_t *data) {
+#ifdef DYNAMIC_PAGE_SIZE
+	// TODO:
+	page_size = PAGE;
+	lg_page_size = LG_PAGE;
+#endif /* DYNAMIC_PAGE_SIZE */
+
 	sc_data_init(data);
 }

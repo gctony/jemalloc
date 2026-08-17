@@ -2,6 +2,7 @@
 #define JEMALLOC_INTERNAL_PAGES_EXTERNS_H
 
 #include "jemalloc/internal/jemalloc_preamble.h"
+#include "jemalloc/internal/assert.h"
 #include "jemalloc/internal/jemalloc_internal_types.h"
 
 /* Actual operating system page size, detected during bootstrap, <= PAGE. */
@@ -19,6 +20,31 @@ extern size_t os_page;
 #define PAGE_CEILING(s) (((s) + PAGE_MASK) & ~PAGE_MASK)
 /* Return the largest pagesize multiple that is <=s. */
 #define PAGE_FLOOR(s) ((s) & ~PAGE_MASK)
+
+#ifdef DYNAMIC_PAGE_SIZE
+#	define MIN_PAGE ((size_t)(1U << MIN_LG_PAGE))
+#	define MAX_PAGE ((size_t)(1U << MAX_LG_PAGE))
+
+extern size_t page_size;
+extern unsigned lg_page_size;
+JEMALLOC_ALWAYS_INLINE size_t
+get_page_size() {
+	assert(page_size == PAGE);
+	return page_size;
+}
+
+JEMALLOC_ALWAYS_INLINE unsigned
+get_lg_page_size() {
+	assert(lg_page_size == LG_PAGE);
+	return lg_page_size;
+}
+
+#	define DYNAMIC_PAGE get_page_size()
+#	define DYNAMIC_LG_PAGE get_lg_page_size()
+#else /* DYNAMIC_PAGE_SIZE */
+#	define DYNAMIC_PAGE PAGE
+#	define DYNAMIC_LG_PAGE LG_PAGE
+#endif /* DYNAMIC_PAGE_SIZE */
 
 /* Huge page size.  LG_HUGEPAGE is determined by the configure script. */
 #define HUGEPAGE ((size_t)(1U << LG_HUGEPAGE))

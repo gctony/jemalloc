@@ -11,6 +11,12 @@
 /******************************************************************************/
 /* Data. */
 
+#ifdef DYNAMIC_PAGE_SIZE
+// TODO:
+size_t page_size;
+unsigned lg_page_size;
+#endif /* DYNAMIC_PAGE_SIZE */
+
 /* Actual operating system page size, detected during bootstrap, <= PAGE. */
 size_t os_page;
 
@@ -53,7 +59,8 @@ pages_map_slow(size_t size, size_t alignment, bool *commit) {
 
 	void *ret;
 	do {
-		void *pages = os_vm_reserve(NULL, alloc_size, alignment, commit);
+		void *pages = os_vm_reserve(
+		    NULL, alloc_size, alignment, commit);
 		if (pages == NULL) {
 			return NULL;
 		}
@@ -405,8 +412,8 @@ init_thp_state(void) {
 	char              buf[sizeof(sys_state_madvise)];
 
 #	if defined(O_CLOEXEC)
-	int fd = malloc_open(
-	    "/sys/kernel/mm/transparent_hugepage/enabled", O_RDONLY | O_CLOEXEC);
+	int fd = malloc_open("/sys/kernel/mm/transparent_hugepage/enabled",
+	    O_RDONLY | O_CLOEXEC);
 #	else
 	int fd = malloc_open(
 	    "/sys/kernel/mm/transparent_hugepage/enabled", O_RDONLY);
