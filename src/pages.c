@@ -11,6 +11,11 @@
 /******************************************************************************/
 /* Data. */
 
+/* TODO: cache-align with os_page */
+#ifdef DYNAMIC_PAGE_SIZE
+unsigned os_lg_page;
+#endif /* DYNAMIC_PAGE_SIZE */
+
 /* Actual operating system page size, detected during bootstrap, <= PAGE. */
 size_t os_page;
 
@@ -53,7 +58,8 @@ pages_map_slow(size_t size, size_t alignment, bool *commit) {
 
 	void *ret;
 	do {
-		void *pages = os_vm_reserve(NULL, alloc_size, alignment, commit);
+		void *pages = os_vm_reserve(
+		    NULL, alloc_size, alignment, commit);
 		if (pages == NULL) {
 			return NULL;
 		}
@@ -405,8 +411,8 @@ init_thp_state(void) {
 	char              buf[sizeof(sys_state_madvise)];
 
 #	if defined(O_CLOEXEC)
-	int fd = malloc_open(
-	    "/sys/kernel/mm/transparent_hugepage/enabled", O_RDONLY | O_CLOEXEC);
+	int fd = malloc_open("/sys/kernel/mm/transparent_hugepage/enabled",
+	    O_RDONLY | O_CLOEXEC);
 #	else
 	int fd = malloc_open(
 	    "/sys/kernel/mm/transparent_hugepage/enabled", O_RDONLY);
@@ -454,15 +460,56 @@ label_error:
 }
 
 bool
-pages_boot(void) {
+pages_pre_boot(void) {
 	os_page = os_vm_page_size();
-	if (os_page > PAGE) {
-		malloc_write("<jemalloc>: Unsupported system page size\n");
+
+#ifdef DYNAMIC_PAGE_SIZE
+	if (os_page == 0 || (os_page & (os_page - 1)) != 0) {
+		malloc_write("<jemalloc>: Invalid system page size\n");
 		if (opt_abort) {
 			abort();
 		}
 		return true;
 	}
+
+	if (os_page < MIN_PAGE) {
+		malloc_write(
+		    "<jemalloc>: Unsupported system page size (small than min page size)\n");
+		if (opt_abort) {
+			abort();
+		}
+		return true;
+	}
+
+	if (os_page > MAX_PAGE) {
+		malloc_write(
+		    "<jemalloc>: Unsupported system page size (larger than max page size)\n");
+		if (opt_abort) {
+			abort();
+		}
+		return true;
+	}
+
+	// TODO: add comment
+	os_lg_page = LG_PAGE;
+#else  /* DYNAMIC_PAGE_SIZE */
+	if (os_page > PAGE) {
+		malloc_write(
+		    "<jemalloc>: Unsupported system page size (larger than page size)\n");
+		if (opt_abort) {
+			abort();
+		}
+		return true;
+	}
+#endif /* DYNAMIC_PAGE_SIZE */
+
+	return false;
+}
+
+bool
+pages_boot(void) {
+	/* pages_pre_boot() should have been called */
+	assert(os_page != 0);
 
 	if (os_overcommit_boot()) {
 		return true;

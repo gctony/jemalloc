@@ -2,6 +2,7 @@
 #define JEMALLOC_INTERNAL_PAGES_EXTERNS_H
 
 #include "jemalloc/internal/jemalloc_preamble.h"
+#include "jemalloc/internal/assert.h"
 #include "jemalloc/internal/jemalloc_internal_types.h"
 
 /* Actual operating system page size, detected during bootstrap, <= PAGE. */
@@ -19,6 +20,49 @@ extern size_t os_page;
 #define PAGE_CEILING(s) (((s) + PAGE_MASK) & ~PAGE_MASK)
 /* Return the largest pagesize multiple that is <=s. */
 #define PAGE_FLOOR(s) ((s) & ~PAGE_MASK)
+
+#ifdef DYNAMIC_PAGE_SIZE
+#	define MIN_PAGE ((size_t)(1U << MIN_LG_PAGE))
+#	define MAX_PAGE ((size_t)(1U << MAX_LG_PAGE))
+
+/* these avoid having to add more #ifdef's in other parts of the code */
+#	define LG_PAGE_OR_MIN MIN_LG_PAGE
+#	define LG_PAGE_OR_MAX MAX_LG_PAGE
+
+extern unsigned os_lg_page;
+
+#	ifdef JEMALLOC_DEBUG
+JEMALLOC_ALWAYS_INLINE unsigned
+get_os_lg_page() {
+	assert(os_lg_page != 0);
+	return os_lg_page;
+}
+
+JEMALLOC_ALWAYS_INLINE size_t
+get_os_page() {
+	assert(os_lg_page != 0);
+	return (1U << os_lg_page);
+}
+#	endif /* JEMALLOC_DEBUG */
+
+/*
+ * Temporary macros to allow us to migrate some macros to non-constant
+ * expressions. These will be eventually removed and replaced with PAGE and LG_PAGE.
+ */
+#	ifdef JEMALLOC_DEBUG
+#		define DYNAMIC_LG_PAGE get_os_lg_page()
+#		define DYNAMIC_PAGE get_os_page()
+#	else /* JEMALLOC_DEBUG */
+#		define DYNAMIC_LG_PAGE os_lg_page
+#		define DYNAMIC_PAGE ((size_t)(1U << os_lg_page))
+#	endif /* JEMALLOC_DEBUG */
+#else          /* DYNAMIC_PAGE_SIZE */
+#	define LG_PAGE_OR_MIN LG_PAGE
+#	define LG_PAGE_OR_MAX LG_PAGE
+
+#	define DYNAMIC_LG_PAGE LG_PAGE
+#	define DYNAMIC_PAGE PAGE
+#endif /* DYNAMIC_PAGE_SIZE */
 
 /* Huge page size.  LG_HUGEPAGE is determined by the configure script. */
 #define HUGEPAGE ((size_t)(1U << LG_HUGEPAGE))
@@ -103,17 +147,17 @@ static const bool pages_can_hugify =
  */
 typedef enum {
 	thp_mode_do_nothing = 0, /* Respect kernel thp settings. */
-	thp_mode_always = 1,  /* Always set MADV_HUGEPAGE. */
-	thp_mode_never = 2,   /* Always set MADV_NOHUGEPAGE. */
+	thp_mode_always = 1,     /* Always set MADV_HUGEPAGE. */
+	thp_mode_never = 2,      /* Always set MADV_NOHUGEPAGE. */
 
 	thp_mode_names_limit = 3,  /* Used for option processing. */
 	thp_mode_not_supported = 3 /* No THP support detected. */
 } thp_mode_t;
 
 typedef enum {
-	system_thp_mode_madvise = 0,     /* Kernel THP mode: madvise */
-	system_thp_mode_always = 1,      /* Kernel THP mode: always */
-	system_thp_mode_never = 2,       /* Kernel THP mode: never */
+	system_thp_mode_madvise = 0,      /* Kernel THP mode: madvise */
+	system_thp_mode_always = 1,       /* Kernel THP mode: always */
+	system_thp_mode_never = 2,        /* Kernel THP mode: never */
 	system_thp_mode_not_supported = 3 /* No THP support detected. */
 } system_thp_mode_t;
 
@@ -135,6 +179,7 @@ bool pages_nohuge(void *addr, size_t size);
 bool pages_collapse(void *addr, size_t size);
 bool pages_dontdump(void *addr, size_t size);
 bool pages_dodump(void *addr, size_t size);
+bool pages_pre_boot(void);
 bool pages_boot(void);
 void pages_set_thp_state(void *ptr, size_t size);
 void pages_mark_guards(void *head, void *tail);
