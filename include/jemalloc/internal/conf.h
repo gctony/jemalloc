@@ -3,7 +3,7 @@
 
 #include "jemalloc/internal/sc.h"
 
-void malloc_conf_init(sc_data_t *sc_data, unsigned bin_shard_sizes[SC_NBINS],
+void malloc_conf_init(sc_data_t *sc_data, unsigned bin_shard_sizes[],
     char readlink_buf[PATH_MAX + 1]);
 void malloc_abort_invalid_conf(void);
 

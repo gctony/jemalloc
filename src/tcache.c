@@ -833,7 +833,7 @@ tcache_init(tsd_t *tsd, tcache_slow_t *tcache_slow, tcache_t *tcache, void *mem,
 	 * check around tcache_nbins is needed on fastpath.  Yet we still
 	 * store the ncached_max in the bin_info for future usage.
 	 */
-	for (unsigned i = tcache_nbins; i < TCACHE_NBINS_MAX; i++) {
+	for (unsigned i = tcache_nbins; i < TCACHE_NBINS; i++) {
 		cache_bin_t *cache_bin = &tcache->bins[i];
 		cache_bin_init_disabled(
 		    cache_bin, tcache_bin_info[i].ncached_max);
@@ -908,12 +908,12 @@ tcache_ncached_max_compute(szind_t szind) {
 }
 
 JET_EXTERN void
-tcache_bin_info_compute(cache_bin_info_t tcache_bin_info[TCACHE_NBINS_MAX]) {
+tcache_bin_info_compute(cache_bin_info_t tcache_bin_info[]) {
 	/*
 	 * Compute the values for each bin, but for bins with indices larger
 	 * than tcache_nbins, no items will be cached.
 	 */
-	for (szind_t i = 0; i < TCACHE_NBINS_MAX; i++) {
+	for (szind_t i = 0; i < TCACHE_NBINS; i++) {
 		unsigned ncached_max = tcache_get_default_ncached_max_set(i)
 		    ? (unsigned)tcache_get_default_ncached_max()[i].ncached_max
 		    : tcache_ncached_max_compute(i);
@@ -931,12 +931,12 @@ tcache_stack_alloc_impl(tsdn_t *tsdn, size_t size, size_t alignment) {
 		return b0_alloc_tcache_stack(tsdn, size);
 	}
 	size = sz_sa2u(size, alignment);
-	return ipallocztm(tsdn, size, alignment, true, NULL,
-	    true, arena_get(TSDN_NULL, 0, true));
+	return ipallocztm(tsdn, size, alignment, true, NULL, true,
+	    arena_get(TSDN_NULL, 0, true));
 }
 
-void *(*JET_MUTABLE tcache_stack_alloc)(tsdn_t *tsdn, size_t size,
-    size_t alignment) = tcache_stack_alloc_impl;
+void *(*JET_MUTABLE tcache_stack_alloc)(
+    tsdn_t *tsdn, size_t size, size_t alignment) = tcache_stack_alloc_impl;
 
 static bool
 tsd_tcache_data_init_impl(
@@ -987,7 +987,7 @@ tsd_tcache_data_init_impl(
 /* Initialize auto tcache (embedded in TSD). */
 static bool
 tsd_tcache_data_init(tsd_t *tsd, arena_t *arena,
-    const cache_bin_info_t tcache_bin_info[TCACHE_NBINS_MAX]) {
+    const cache_bin_info_t tcache_bin_info[]) {
 	assert(tcache_bin_info != NULL);
 	bool err = tsd_tcache_data_init_impl(tsd, arena, tcache_bin_info);
 	if (unlikely(err)) {
@@ -1060,7 +1060,7 @@ tsd_tcache_enabled_data_init(tsd_t *tsd) {
 	if (opt_tcache) {
 		/* Initialize the bins before advertising the tcache. */
 		err = tsd_tcache_data_init(
-			tsd, NULL, tcache_get_default_ncached_max());
+		    tsd, NULL, tcache_get_default_ncached_max());
 	}
 
 	tsd_tcache_enabled_set(tsd, opt_tcache && !err);
@@ -1074,7 +1074,7 @@ tcache_enabled_set(tsd_t *tsd, bool enabled) {
 
 	if (!was_enabled && enabled) {
 		if (tsd_tcache_data_init(
-		    tsd, NULL, tcache_get_default_ncached_max())) {
+		        tsd, NULL, tcache_get_default_ncached_max())) {
 			return;
 		}
 	} else if (was_enabled && !enabled) {
@@ -1113,7 +1113,8 @@ thread_tcache_max_set(tsd_t *tsd, size_t tcache_max) {
 	tcache_max_set(tcache_slow, tcache_max);
 
 	if (enabled) {
-		ret = tsd_tcache_data_init(tsd, assigned_arena, tcache_bin_info);
+		ret = tsd_tcache_data_init(
+		    tsd, assigned_arena, tcache_bin_info);
 	}
 
 	assert(tcache_nbins_get(tcache_slow) == sz_size2index(tcache_max) + 1);
@@ -1122,8 +1123,8 @@ thread_tcache_max_set(tsd_t *tsd, size_t tcache_max) {
 
 static bool
 tcache_bin_info_settings_parse(const char *bin_settings_segment_cur,
-    size_t len_left, cache_bin_info_t tcache_bin_info[TCACHE_NBINS_MAX],
-    bool bin_info_is_set[TCACHE_NBINS_MAX]) {
+    size_t len_left, cache_bin_info_t tcache_bin_info[],
+    bool bin_info_is_set[]) {
 	do {
 		size_t size_start, size_end;
 		size_t ncached_max;
@@ -1263,7 +1264,7 @@ tcache_cleanup(tsd_t *tsd) {
 
 	tcache_destroy(tsd, tcache, true);
 	/* Make sure all bins used are reinitialized to the clean state. */
-	memset(tcache->bins, 0, sizeof(cache_bin_t) * TCACHE_NBINS_MAX);
+	memset(tcache->bins, 0, sizeof(cache_bin_t) * TCACHE_NBINS);
 }
 
 static bool

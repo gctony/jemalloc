@@ -420,7 +420,7 @@ validate_hpa_settings(void) {
 }
 
 static void
-malloc_conf_init_helper(sc_data_t *sc_data, unsigned bin_shard_sizes[SC_NBINS],
+malloc_conf_init_helper(sc_data_t *sc_data, unsigned bin_shard_sizes[],
     bool initial_call, const char *opts_cache[MALLOC_CONF_NSOURCES],
     char readlink_buf[PATH_MAX + 1]) {
 	static const char *opts_explain[MALLOC_CONF_NSOURCES] = {
@@ -955,8 +955,8 @@ malloc_conf_init_helper(sc_data_t *sc_data, unsigned bin_shard_sizes[SC_NBINS],
 			    CONF_CHECK_MAX, true);
 			CONF_HANDLE_SIZE_T(opt_pac_sec_opts.max_bytes,
 			    "experimental_pac_sec_max_bytes",
-			    SEC_OPTS_MAX_BYTES_DEFAULT, 0,
-			    CONF_CHECK_MIN, CONF_DONT_CHECK_MAX, true);
+			    SEC_OPTS_MAX_BYTES_DEFAULT, 0, CONF_CHECK_MIN,
+			    CONF_DONT_CHECK_MAX, true);
 
 			if (CONF_MATCH("slab_sizes")) {
 				if (CONF_MATCH_VALUE("default")) {
@@ -1185,7 +1185,7 @@ malloc_conf_init_check_deps(void) {
 }
 
 void
-malloc_conf_init(sc_data_t *sc_data, unsigned bin_shard_sizes[SC_NBINS],
+malloc_conf_init(sc_data_t *sc_data, unsigned bin_shard_sizes[],
     char readlink_buf[PATH_MAX + 1]) {
 	const char *opts_cache[MALLOC_CONF_NSOURCES] = {
 	    NULL, NULL, NULL, NULL, NULL};
