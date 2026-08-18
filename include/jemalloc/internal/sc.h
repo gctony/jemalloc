@@ -3,6 +3,7 @@
 
 #include "jemalloc/internal/jemalloc_preamble.h"
 #include "jemalloc/internal/jemalloc_internal_types.h"
+#include "jemalloc/internal/pages.h"
 
 /*
  * Size class computations:
@@ -234,32 +235,33 @@
 #	define SC_NPSIZES_MAX SC_NPSIZES
 #endif /* DYNAMIC_PAGE_SIZE */
 
-#if 0
-// TODO: remove
-#	define SC_NPSIZES                                                     \
-		(SC_NGROUP                                                     \
-		    + (SC_LG_BASE_MAX - (LG_PAGE + SC_LG_NGROUP)) * SC_NGROUP  \
-		    + SC_NGROUP - 1)
-#endif // 0
-
 /*
  * We declare a size class is binnable if size < page size * group. Or, in other
  * words, lg(size) < lg(page size) + lg(group size).
  */
-#define SC_NBINS                                                                                                    \
+#define SC_NBINS_FOR(_lg_page)                                                                                      \
 	(/* Sub-regular size classes. */                                                                            \
 	    SC_NTINY                                                                                                \
 	    + SC_NPSEUDO /* Groups with lg_regular_min_base <= lg_base <= lg_base_max */                            \
 	    + SC_NGROUP                                                                                             \
-	        * (LG_PAGE + SC_LG_NGROUP                                                                           \
+	        * ((_lg_page) + SC_LG_NGROUP                                                                        \
 	            - SC_LG_FIRST_REGULAR_BASE) /* Last SC of the last group hits the bound exactly; exclude it. */ \
 	    - 1)
+#ifdef DYNAMIC_PAGE_SIZE
+#	define SC_NBINS SC_NBINS_FOR(get_lg_page_size())
+#	define SC_NBINS_MIN SC_NBINS_FOR(MIN_LG_PAGE)
+#	define SC_NBINS_MAX SC_NBINS_FOR(MAX_LG_PAGE)
+#else /* DYNAMIC_PAGE_SIZE */
+#	define SC_NBINS SC_NBINS_FOR(LG_PAGE)
+#	define SC_NBINS_MIN SC_NBINS
+#	define SC_NBINS_MAX SC_NBINS
+#endif /* DYNAMIC_PAGE_SIZE */
 
 /*
  * The size2index_tab lookup table uses uint8_t to encode each bin index, so we
  * cannot support more than 256 small size classes.
  */
-#if (SC_NBINS > 256)
+#if (SC_NBINS_MAX > 256)
 #	error "Too many small size classes"
 #endif
 
@@ -282,7 +284,15 @@
 
 /* The smallest size class not allocated out of a slab. */
 #define SC_LARGE_MINCLASS ((size_t)1ULL << (LG_PAGE + SC_LG_NGROUP))
-#define SC_LG_LARGE_MINCLASS (LG_PAGE + SC_LG_NGROUP)
+#define SC_LG_LARGE_MINCLASS_FOR(_lg_page) ((_lg_page) + SC_LG_NGROUP)
+#ifdef DYNAMIC_PAGE_SIZE
+#	define SC_LG_LARGE_MINCLASS                                           \
+		SC_LG_LARGE_MINCLASS_FOR(get_lg_page_size())
+#	define SC_LG_LARGE_MINCLASS_MIN SC_LG_LARGE_MINCLASS_FOR(MIN_LG_PAGE)
+#else /* DYNAMIC_PAGE_SIZE */
+#	define SC_LG_LARGE_MINCLASS SC_LG_LARGE_MINCLASS_FOR(LG_PAGE)
+#	define SC_LG_LARGE_MINCLASS_MIN SC_LG_LARGE_MINCLASS
+#endif /* DYNAMIC_PAGE_SIZE */
 
 /*
  * The largest size class supported.  Spell this out directly to avoid
@@ -322,7 +332,18 @@
  * 2, and PAGE being 4KB, the threshold for tcache (USIZE_GROW_SLOW_THRESHOLD)
  * is 32KB.
  */
-#define LG_USIZE_GROW_SLOW_THRESHOLD (SC_LG_NGROUP + LG_PAGE + 1)
+#define LG_USIZE_GROW_SLOW_THRESHOLD_FOR(_lg_page)                             \
+	(SC_LG_NGROUP + (_lg_page) + 1)
+#ifdef DYNAMIC_PAGE_SIZE
+#	define LG_USIZE_GROW_SLOW_THRESHOLD                                   \
+		LG_USIZE_GROW_SLOW_THRESHOLD_FOR(get_lg_page_size())
+#	define LG_USIZE_GROW_SLOW_THRESHOLD_MAX                               \
+		LG_USIZE_GROW_SLOW_THRESHOLD_FOR(MAX_LG_PAGE)
+#else /* DYNAMIC_PAGE_SIZE */
+#	define LG_USIZE_GROW_SLOW_THRESHOLD                                   \
+		LG_USIZE_GROW_SLOW_THRESHOLD_FOR(LG_PAGE)
+#	define LG_USIZE_GROW_SLOW_THRESHOLD_MAX LG_USIZE_GROW_SLOW_THRESHOLD
+#endif /* DYNAMIC_PAGE_SIZE */
 #define USIZE_GROW_SLOW_THRESHOLD (1U << LG_USIZE_GROW_SLOW_THRESHOLD)
 
 #define SC_SLAB_MAXREGS (1U << SC_LG_SLAB_MAXREGS)

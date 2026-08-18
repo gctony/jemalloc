@@ -170,7 +170,7 @@ malloc_init_hard_a0_locked(void) {
 	 * read out of sc_data_global are final.
 	 */
 	sc_boot(&sc_data);
-	unsigned bin_shard_sizes[SC_NBINS];
+	unsigned bin_shard_sizes[SC_NBINS_MAX];
 	bin_shard_sizes_boot(bin_shard_sizes);
 	/*
 	 * prof_boot0 only initializes opt_prof_prefix.  We need to do it before
@@ -543,6 +543,7 @@ malloc_init_hard(void) {
 	/* TODO: runtime checks on bounds */
 	assert(TCACHE_MAXCLASS_LIMIT <= USIZE_GROW_SLOW_THRESHOLD);
 	assert(SC_LOOKUP_MAXCLASS <= USIZE_GROW_SLOW_THRESHOLD);
+	assert(TCACHE_NBINS <= TCACHE_NBINS_MAX);
 
 	/*
 	 * This asserts an extreme case where TINY_MAXCLASS is larger

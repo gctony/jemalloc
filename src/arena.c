@@ -45,11 +45,10 @@ static atomic_zd_t muzzy_decay_ms_default;
 emap_t              arena_emap_global;
 static pa_central_t arena_pa_central_global;
 
-div_info_t arena_binind_div_info[SC_NBINS];
+div_info_t arena_binind_div_info[SC_NBINS_MAX];
 
 JET_EXTERN void
-bin_dalloc_locked_begin(
-    bin_dalloc_locked_info_t *info, szind_t binind) {
+bin_dalloc_locked_begin(bin_dalloc_locked_info_t *info, szind_t binind) {
 	info->div_info = arena_binind_div_info[binind];
 	info->nregs = bin_infos[binind].nregs;
 	info->ndalloc = 0;
@@ -58,7 +57,7 @@ bin_dalloc_locked_begin(
 size_t opt_oversize_threshold = OVERSIZE_THRESHOLD_DEFAULT;
 size_t oversize_threshold = OVERSIZE_THRESHOLD_DEFAULT;
 
-uint32_t        arena_bin_offsets[SC_NBINS];
+uint32_t        arena_bin_offsets[SC_NBINS_MAX];
 static unsigned nbins_total;
 
 /*
@@ -67,10 +66,10 @@ static unsigned nbins_total;
  * which is the last one of the auto arenas.
  */
 static unsigned huge_arena_ind = 0;
-bool      opt_huge_arena_pac_thp = false;
-pac_thp_t huge_arena_pac_thp = {.thp_madvise = false,
-    .auto_thp_switched = false,
-    .n_thp_lazy = ATOMIC_INIT(0)};
+bool            opt_huge_arena_pac_thp = false;
+pac_thp_t       huge_arena_pac_thp = {.thp_madvise = false,
+          .auto_thp_switched = false,
+          .n_thp_lazy = ATOMIC_INIT(0)};
 
 const arena_config_t arena_config_default = {
     /* .extent_hooks = */ (extent_hooks_t *)&ehooks_default_extent_hooks,
@@ -181,7 +180,7 @@ arena_stats_merge(tsdn_t *tsdn, arena_t *arena, unsigned *nthreads,
 	malloc_mutex_lock(tsdn, &arena->cache_bin_array_descriptor_ql_mtx);
 	cache_bin_array_descriptor_t *descriptor;
 	ql_foreach (descriptor, &arena->cache_bin_array_descriptor_ql, link) {
-		for (szind_t i = 0; i < TCACHE_NBINS_MAX; i++) {
+		for (szind_t i = 0; i < TCACHE_NBINS; i++) {
 			cache_bin_t *cache_bin = &descriptor->bins[i];
 			if (cache_bin_disabled(cache_bin)) {
 				continue;
@@ -234,8 +233,8 @@ arena_locality_hint(tsdn_t *tsdn, arena_t *arena, szind_t szind) {
 }
 
 void
-arena_cache_bin_array_register(tsdn_t *tsdn, arena_t *arena,
-    cache_bin_array_descriptor_t *desc) {
+arena_cache_bin_array_register(
+    tsdn_t *tsdn, arena_t *arena, cache_bin_array_descriptor_t *desc) {
 	cassert(config_stats);
 	malloc_mutex_lock(tsdn, &arena->cache_bin_array_descriptor_ql_mtx);
 	ql_tail_insert(&arena->cache_bin_array_descriptor_ql, desc, link);
@@ -243,10 +242,10 @@ arena_cache_bin_array_register(tsdn_t *tsdn, arena_t *arena,
 }
 
 static void
-arena_cache_bin_stats_flush(tsdn_t *tsdn, arena_t *arena,
-    cache_bin_array_descriptor_t *desc) {
+arena_cache_bin_stats_flush(
+    tsdn_t *tsdn, arena_t *arena, cache_bin_array_descriptor_t *desc) {
 	cassert(config_stats);
-	for (unsigned i = 0; i < TCACHE_NBINS_MAX; i++) {
+	for (unsigned i = 0; i < TCACHE_NBINS; i++) {
 		cache_bin_t *cache_bin = &desc->bins[i];
 		if (cache_bin_disabled(cache_bin)) {
 			continue;
