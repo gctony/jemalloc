@@ -1184,9 +1184,18 @@ malloc_conf_init_check_deps(void) {
 	return false;
 }
 
+static void
+static_opts_init(void) {
+	opt_hpa_opts = (hpa_shard_opts_t)HPA_SHARD_OPTS_DEFAULT;
+	opt_hpa_sec_opts = (sec_opts_t)HPA_SEC_OPTS_DEFAULT;
+	opt_pac_sec_opts = (sec_opts_t)PAC_SEC_OPTS_DEFAULT;
+}
+
 void
 malloc_conf_init(sc_data_t *sc_data, unsigned bin_shard_sizes[],
     char readlink_buf[PATH_MAX + 1]) {
+	static_opts_init();
+
 	const char *opts_cache[MALLOC_CONF_NSOURCES] = {
 	    NULL, NULL, NULL, NULL, NULL};
 
