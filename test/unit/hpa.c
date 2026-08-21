@@ -66,27 +66,31 @@ static hpa_shard_opts_t test_hpa_shard_opts_purge = {
     /* hugify_style */
     hpa_hugify_style_lazy};
 
-static hpa_shard_opts_t test_hpa_shard_opts_aggressive = {
-    /* slab_max_alloc */
-    HUGEPAGE,
-    /* hugification_threshold */
-    0.9 * HUGEPAGE,
-    /* dirty_mult */
-    FXP_INIT_PERCENT(11),
-    /* deferral_allowed */
-    true,
-    /* hugify_delay_ms */
-    0,
-    /* hugify_sync */
-    false,
-    /* min_purge_interval_ms */
-    5,
-    /* purge_threshold */
-    HUGEPAGE - 5 * PAGE,
-    /* min_purge_delay_ms */
-    10,
-    /* hugify_style */
-    hpa_hugify_style_eager};
+static hpa_shard_opts_t
+test_hpa_shard_opts_aggressive() {
+	return (hpa_shard_opts_t){
+
+		/* slab_max_alloc */
+	    HUGEPAGE,
+	    /* hugification_threshold */
+	    0.9 * HUGEPAGE,
+	    /* dirty_mult */
+	    FXP_INIT_PERCENT(11),
+	    /* deferral_allowed */
+	    true,
+	    /* hugify_delay_ms */
+	    0,
+	    /* hugify_sync */
+	    false,
+	    /* min_purge_interval_ms */
+	    5,
+	    /* purge_threshold */
+	    HUGEPAGE - 5 * PAGE,
+	    /* min_purge_delay_ms */
+	    10,
+	    /* hugify_style */
+	    hpa_hugify_style_eager};
+}
 
 static hpa_shard_t *
 create_test_data(const hpa_hooks_t *hooks, hpa_shard_opts_t *opts) {
@@ -141,8 +145,8 @@ TEST_BEGIN(test_alloc_max) {
 	    /* frequent_reuse */ false, &deferred_work_generated);
 	expect_ptr_not_null(edata, "Allocation of small max failed");
 
-	edata = hpa_alloc(tsdn, shard, ALLOC_MAX + PAGE, PAGE, false,
-	    false, /* frequent_reuse */ false, &deferred_work_generated);
+	edata = hpa_alloc(tsdn, shard, ALLOC_MAX + PAGE, PAGE, false, false,
+	    /* frequent_reuse */ false, &deferred_work_generated);
 	expect_ptr_null(edata, "Allocation of larger than small max succeeded");
 
 	edata = hpa_alloc(tsdn, shard, ALLOC_MAX, PAGE, false, false,
@@ -153,8 +157,8 @@ TEST_BEGIN(test_alloc_max) {
 	    /* frequent_reuse */ true, &deferred_work_generated);
 	expect_ptr_not_null(edata, "Allocation of frequent reused failed");
 
-	edata = hpa_alloc(tsdn, shard, HUGEPAGE + PAGE, PAGE, false,
-	    false, /* frequent_reuse */ true, &deferred_work_generated);
+	edata = hpa_alloc(tsdn, shard, HUGEPAGE + PAGE, PAGE, false, false,
+	    /* frequent_reuse */ true, &deferred_work_generated);
 	expect_ptr_null(edata, "Allocation of larger than hugepage succeeded");
 
 	destroy_test_data(shard);
@@ -257,8 +261,8 @@ TEST_BEGIN(test_stress) {
 			size_t npages = npages_min
 			    + prng_range_zu(
 			        &prng_state, npages_max - npages_min);
-			edata_t *edata = hpa_alloc(tsdn, shard,
-			    npages * PAGE, PAGE, false, false, false,
+			edata_t *edata = hpa_alloc(tsdn, shard, npages * PAGE,
+			    PAGE, false, false, false,
 			    &deferred_work_generated);
 			assert_ptr_not_null(
 			    edata, "Unexpected allocation failure");
@@ -276,8 +280,8 @@ TEST_BEGIN(test_stress) {
 			live_edatas[victim] = live_edatas[nlive_edatas - 1];
 			nlive_edatas--;
 			node_remove(&tree, to_free);
-			hpa_dalloc(tsdn, shard, to_free,
-			    &deferred_work_generated);
+			hpa_dalloc(
+			    tsdn, shard, to_free, &deferred_work_generated);
 		}
 	}
 
@@ -686,7 +690,7 @@ TEST_BEGIN(test_starts_huge) {
 	hooks.ms_since = &defer_test_ms_since;
 	hooks.vectorized_purge = &defer_vectorized_purge;
 
-	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive;
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
 	opts.deferral_allowed = true;
 	opts.min_purge_delay_ms = 10;
 	opts.min_purge_interval_ms = 0;
@@ -825,7 +829,7 @@ TEST_BEGIN(test_start_huge_purge_empty_only) {
 	hooks.ms_since = &defer_test_ms_since;
 	hooks.vectorized_purge = &defer_vectorized_purge;
 
-	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive;
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
 	opts.deferral_allowed = true;
 	opts.purge_threshold = HUGEPAGE;
 	opts.min_purge_delay_ms = 0;
@@ -891,7 +895,7 @@ TEST_BEGIN(test_assume_huge_purge_fully) {
 	hooks.ms_since = &defer_test_ms_since;
 	hooks.vectorized_purge = &defer_vectorized_purge;
 
-	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive;
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
 	opts.deferral_allowed = true;
 	opts.purge_threshold = PAGE;
 	opts.hugification_threshold = HUGEPAGE;
@@ -986,7 +990,7 @@ TEST_BEGIN(test_eager_with_purge_threshold) {
 	hooks.vectorized_purge = &defer_vectorized_purge;
 
 	const size_t     THRESHOLD = 10;
-	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive;
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
 	opts.deferral_allowed = true;
 	opts.purge_threshold = THRESHOLD * PAGE;
 	opts.min_purge_delay_ms = 0;
@@ -1040,7 +1044,7 @@ TEST_BEGIN(test_delay_when_not_allowed_deferral) {
 	hooks.vectorized_purge = &defer_vectorized_purge;
 
 	const uint64_t   DELAY_NS = 100 * 1000 * 1000;
-	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive;
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
 	opts.deferral_allowed = false;
 	opts.purge_threshold = HUGEPAGE - 2 * PAGE;
 	opts.min_purge_delay_ms = DELAY_NS / (1000 * 1000);
@@ -1104,7 +1108,7 @@ TEST_BEGIN(test_deferred_until_time) {
 	hooks.ms_since = &defer_test_ms_since;
 	hooks.vectorized_purge = &defer_vectorized_purge;
 
-	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive;
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
 	opts.deferral_allowed = true;
 	opts.purge_threshold = PAGE;
 	opts.min_purge_delay_ms = 1000;
@@ -1182,7 +1186,7 @@ TEST_BEGIN(test_eager_no_hugify_on_threshold) {
 	hooks.ms_since = &defer_test_ms_since;
 	hooks.vectorized_purge = &defer_vectorized_purge;
 
-	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive;
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
 	opts.deferral_allowed = true;
 	opts.purge_threshold = PAGE;
 	opts.min_purge_delay_ms = 0;
@@ -1253,7 +1257,7 @@ TEST_BEGIN(test_hpa_hugify_style_none_huge_no_syscall) {
 	hooks.ms_since = &defer_test_ms_since;
 	hooks.vectorized_purge = &defer_vectorized_purge;
 
-	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive;
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
 	opts.deferral_allowed = true;
 	opts.purge_threshold = PAGE;
 	opts.min_purge_delay_ms = 0;

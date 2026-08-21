@@ -8,6 +8,15 @@
 /* Actual operating system page size, detected during bootstrap, <= PAGE. */
 extern size_t os_page;
 
+#ifdef DYNAMIC_PAGE_SIZE
+#	undef LG_PAGE
+#	ifdef JEMALLOC_DEBUG
+#		define LG_PAGE get_os_lg_page()
+#	else /* JEMALLOC_DEBUG */
+#		define LG_PAGE os_lg_page
+#	endif /* JEMALLOC_DEBUG */
+#endif         /* DYNAMIC_PAGE_SIZE */
+
 /* Page size.  LG_PAGE is determined by the configure script. */
 #ifdef PAGE_MASK
 #	undef PAGE_MASK
@@ -40,8 +49,8 @@ get_os_lg_page() {
 
 JEMALLOC_ALWAYS_INLINE size_t
 get_os_page() {
-	assert(os_lg_page != 0);
-	return (1U << os_lg_page);
+	assert(os_page != 0);
+	return os_page;
 }
 #	endif /* JEMALLOC_DEBUG */
 
@@ -54,7 +63,7 @@ get_os_page() {
 #		define DYNAMIC_PAGE get_os_page()
 #	else /* JEMALLOC_DEBUG */
 #		define DYNAMIC_LG_PAGE os_lg_page
-#		define DYNAMIC_PAGE ((size_t)(1U << os_lg_page))
+#		define DYNAMIC_PAGE os_page
 #	endif /* JEMALLOC_DEBUG */
 #else          /* DYNAMIC_PAGE_SIZE */
 #	define LG_PAGE_OR_MIN LG_PAGE

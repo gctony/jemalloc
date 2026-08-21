@@ -490,8 +490,8 @@ pages_pre_boot(void) {
 		return true;
 	}
 
-	// TODO: add comment
-	os_lg_page = LG_PAGE;
+	os_lg_page = lg_floor(os_page);
+	assert((1U << os_lg_page) == os_page);
 #else  /* DYNAMIC_PAGE_SIZE */
 	if (os_page > PAGE) {
 		malloc_write(
