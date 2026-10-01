@@ -397,6 +397,107 @@ TEST_BEGIN(test_stats_arenas_lextents) {
 }
 TEST_END
 
+TEST_BEGIN(test_stats_hpa_central) {
+	const char *size_names[] = {
+	    "stats.hpa_central.nchunks",
+	    "stats.hpa_central.nspare",
+	    "stats.hpa_central.nactive",
+	    "stats.hpa_central.nfree",
+	};
+	const char *counter_names[] = {
+	    "stats.hpa_central.nchunk_maps",
+	    "stats.hpa_central.nchunk_unmaps",
+	    "stats.hpa_central.nextracts",
+	    "stats.hpa_central.nreuses",
+	    "stats.hpa_central.ndallocs",
+	    "stats.hpa_central.ndalloc_purges",
+	};
+	int expected = config_stats ? 0 : ENOENT;
+	for (size_t i = 0; i < sizeof(size_names) / sizeof(size_names[0]);
+	    i++) {
+		size_t value;
+		size_t sz = sizeof(value);
+		expect_d_eq(mallctl(size_names[i], &value, &sz, NULL, 0),
+		    expected, "Unexpected HPA central gauge mallctl result");
+	}
+	for (size_t i = 0; i < sizeof(counter_names) / sizeof(counter_names[0]);
+	    i++) {
+		uint64_t value;
+		size_t   sz = sizeof(value);
+		expect_d_eq(mallctl(counter_names[i], &value, &sz, NULL, 0),
+		    expected, "Unexpected HPA central counter mallctl result");
+	}
+	if (!config_stats) {
+		goto label_done;
+	}
+
+	void *p = NULL;
+	if (opt_hpa) {
+		unsigned arena_ind;
+		size_t   sz = sizeof(arena_ind);
+		expect_d_eq(mallctl("arenas.create", &arena_ind, &sz, NULL, 0),
+		    0, "Unexpected arenas.create failure");
+		p = mallocx(1, MALLOCX_ARENA(arena_ind) | MALLOCX_TCACHE_NONE);
+		expect_ptr_not_null(p, "Unexpected HPA allocation failure");
+	}
+
+	uint64_t epoch = 1;
+	expect_d_eq(mallctl("epoch", NULL, NULL, &epoch, sizeof(epoch)), 0,
+	    "Unexpected epoch refresh failure");
+	size_t   nchunks, nspare, nactive, nfree;
+	uint64_t nchunk_maps, nchunk_unmaps, nextracts, ndallocs;
+	size_t   sz = sizeof(size_t);
+	expect_d_eq(
+	    mallctl("stats.hpa_central.nchunks", &nchunks, &sz, NULL, 0), 0,
+	    "Unexpected nchunks mallctl failure");
+	sz = sizeof(size_t);
+	expect_d_eq(mallctl("stats.hpa_central.nspare", &nspare, &sz, NULL, 0),
+	    0, "Unexpected nspare mallctl failure");
+	sz = sizeof(size_t);
+	expect_d_eq(
+	    mallctl("stats.hpa_central.nactive", &nactive, &sz, NULL, 0), 0,
+	    "Unexpected nactive mallctl failure");
+	sz = sizeof(size_t);
+	expect_d_eq(mallctl("stats.hpa_central.nfree", &nfree, &sz, NULL, 0), 0,
+	    "Unexpected nfree mallctl failure");
+	sz = sizeof(uint64_t);
+	expect_d_eq(mallctl("stats.hpa_central.nchunk_maps", &nchunk_maps, &sz,
+	                NULL, 0),
+	    0, "Unexpected nchunk_maps mallctl failure");
+	sz = sizeof(uint64_t);
+	expect_d_eq(mallctl("stats.hpa_central.nchunk_unmaps", &nchunk_unmaps,
+	                &sz, NULL, 0),
+	    0, "Unexpected nchunk_unmaps mallctl failure");
+	sz = sizeof(uint64_t);
+	expect_d_eq(
+	    mallctl("stats.hpa_central.nextracts", &nextracts, &sz, NULL, 0), 0,
+	    "Unexpected nextracts mallctl failure");
+	sz = sizeof(uint64_t);
+	expect_d_eq(
+	    mallctl("stats.hpa_central.ndallocs", &ndallocs, &sz, NULL, 0), 0,
+	    "Unexpected ndallocs mallctl failure");
+
+	expect_u64_ge(
+	    nchunk_maps, nchunk_unmaps, "Chunk unmaps cannot exceed maps");
+	expect_zu_eq(nchunks, (size_t)(nchunk_maps - nchunk_unmaps),
+	    "Mapped chunk gauge should match map/unmap counters");
+	expect_u64_ge(
+	    nextracts, ndallocs, "Central returns cannot exceed extracts");
+	expect_zu_eq(nactive, (size_t)(nextracts - ndallocs),
+	    "Active gauge should match extract/return counters");
+	expect_zu_eq(nactive + nfree, nchunks * HPA_CHUNK_NSLOTS,
+	    "Mapped chunk slots should be active or free");
+	expect_zu_le(
+	    nspare, 1, "At most one fully free chunk may remain mapped");
+	if (opt_hpa) {
+		expect_zu_ge(nactive, 1,
+		    "A new HPA arena allocation should activate a pageslab");
+		dallocx(p, MALLOCX_TCACHE_NONE);
+	}
+label_done:;
+}
+TEST_END
+
 static void
 test_tcache_bytes_for_usize(size_t usize) {
 	uint64_t epoch;
@@ -535,8 +636,8 @@ TEST_BEGIN(test_approximate_stats_active) {
 	 */
 	unsigned current_arena_ind;
 	sz = sizeof(current_arena_ind);
-	expect_d_eq(mallctl("thread.arena", (void *)&current_arena_ind, &sz,
-	                NULL, 0),
+	expect_d_eq(
+	    mallctl("thread.arena", (void *)&current_arena_ind, &sz, NULL, 0),
 	    0, "Unexpected mallctl() result");
 	expect_u_lt(current_arena_ind, narenas_auto,
 	    "Expected thread to use an automatically managed arena");
@@ -548,10 +649,10 @@ TEST_BEGIN(test_approximate_stats_active) {
 	                (void *)&approximate_active_before, &sz, NULL, 0),
 	    0, "Unexpected mallctl() result");
 
-	test_skip_if(approximate_active_before
-	    > SC_LARGE_MAXCLASS - SC_LARGE_MINCLASS);
+	test_skip_if(
+	    approximate_active_before > SC_LARGE_MAXCLASS - SC_LARGE_MINCLASS);
 	size_t alloc_size = approximate_active_before + SC_LARGE_MINCLASS;
-	void *p0 = mallocx(alloc_size, MALLOCX_TCACHE_NONE);
+	void  *p0 = mallocx(alloc_size, MALLOCX_TCACHE_NONE);
 	expect_ptr_not_null(p0, "Unexpected mallocx() failure");
 	size_t usable = sallocx(p0, 0);
 
@@ -570,6 +671,7 @@ main(void) {
 	return test_no_reentrancy(test_stats_summary, test_stats_large,
 	    test_stats_arenas_summary, test_stats_arenas_small,
 	    test_stats_arenas_large, test_stats_arenas_bins,
-	    test_stats_arenas_lextents, test_stats_tcache_bytes_small,
-	    test_stats_tcache_bytes_large, test_approximate_stats_active);
+	    test_stats_arenas_lextents, test_stats_hpa_central,
+	    test_stats_tcache_bytes_small, test_stats_tcache_bytes_large,
+	    test_approximate_stats_active);
 }

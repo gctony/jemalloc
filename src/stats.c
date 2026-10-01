@@ -461,6 +461,21 @@ stats_gather_global(stats_global_t *g) {
 	CTL_GET("stats.retained", &g->retained, size_t);
 	CTL_GET("stats.pinned", &g->pinned, size_t);
 	CTL_GET("stats.zero_reallocs", &g->zero_reallocs, size_t);
+	CTL_GET("stats.hpa_central.nchunks", &g->hpa_central.nchunks, size_t);
+	CTL_GET("stats.hpa_central.nspare", &g->hpa_central.nspare, size_t);
+	CTL_GET("stats.hpa_central.nactive", &g->hpa_central.nactive, size_t);
+	CTL_GET("stats.hpa_central.nfree", &g->hpa_central.nfree, size_t);
+	CTL_GET("stats.hpa_central.nchunk_maps", &g->hpa_central.nchunk_maps,
+	    uint64_t);
+	CTL_GET("stats.hpa_central.nchunk_unmaps",
+	    &g->hpa_central.nchunk_unmaps, uint64_t);
+	CTL_GET(
+	    "stats.hpa_central.nextracts", &g->hpa_central.nextracts, uint64_t);
+	CTL_GET("stats.hpa_central.nreuses", &g->hpa_central.nreuses, uint64_t);
+	CTL_GET(
+	    "stats.hpa_central.ndallocs", &g->hpa_central.ndallocs, uint64_t);
+	CTL_GET("stats.hpa_central.ndalloc_purges",
+	    &g->hpa_central.ndalloc_purges, uint64_t);
 
 	if (have_background_thread) {
 		CTL_GET("stats.background_thread.num_threads",
@@ -481,11 +496,11 @@ stats_gather_global(stats_global_t *g) {
  * initialized arenas.
  */
 static unsigned
-stats_gather_arenas_initialized(unsigned narenas, bool *initialized,
-    bool *destroyed_initialized) {
-	size_t mib[3];
-	size_t miblen = sizeof(mib) / sizeof(size_t);
-	size_t sz;
+stats_gather_arenas_initialized(
+    unsigned narenas, bool *initialized, bool *destroyed_initialized) {
+	size_t   mib[3];
+	size_t   miblen = sizeof(mib) / sizeof(size_t);
+	size_t   sz;
 	unsigned ninitialized = 0;
 
 	xmallctlnametomib("arena.0.initialized", mib, &miblen);
@@ -713,18 +728,18 @@ typedef struct {
 	const char              *util;
 } stats_arena_bin_emit_row_t;
 
-#define BIN_COL_GET(name, value_member, field)                                \
-	static void                                                            \
-	stats_bin_col_get_##name(const void *vrow, emitter_col_t *col) {        \
-		const stats_arena_bin_emit_row_t *row = vrow;                    \
-		col->value_member = row->bin->field;                              \
+#define BIN_COL_GET(name, value_member, field)                                 \
+	static void stats_bin_col_get_##name(                                  \
+	    const void *vrow, emitter_col_t *col) {                            \
+		const stats_arena_bin_emit_row_t *row = vrow;                  \
+		col->value_member = row->bin->field;                           \
 	}
-#define BIN_COL_GET_RATE(name, field)                                         \
-	static void                                                            \
-	stats_bin_col_get_##name(const void *vrow, emitter_col_t *col) {        \
-		const stats_arena_bin_emit_row_t *row = vrow;                    \
-		col->uint64_val = rate_per_second(                               \
-		    row->bin->field, row->uptime);                                \
+#define BIN_COL_GET_RATE(name, field)                                          \
+	static void stats_bin_col_get_##name(                                  \
+	    const void *vrow, emitter_col_t *col) {                            \
+		const stats_arena_bin_emit_row_t *row = vrow;                  \
+		col->uint64_val = rate_per_second(                             \
+		    row->bin->field, row->uptime);                             \
 	}
 BIN_COL_GET(size, size_val, reg_size)
 BIN_COL_GET(nmalloc, uint64_val, nmalloc)
@@ -784,58 +799,50 @@ stats_bin_col_get_util(const void *vrow, emitter_col_t *col) {
 
 #define BIN_COL_SIZE 0
 
-#define BIN_DESC(key, label, width, type, flags, name)                        \
-	{key, label, emitter_justify_right, width, emitter_type_##type, flags,   \
+#define BIN_DESC(key, label, width, type, flags, name)                         \
+	{key, label, emitter_justify_right, width, emitter_type_##type, flags, \
 	    stats_bin_col_get_##name}
 static const emitter_col_desc_t stats_bin_cols[] = {
-	BIN_DESC("size", "size", 20, size, STATS_COL_FLAG_NONE, size),
-	BIN_DESC("ind", "ind", 4, unsigned, STATS_COL_FLAG_NONE, ind),
-	BIN_DESC("allocated", "allocated", 14, size, STATS_COL_FLAG_NONE,
-	    allocated),
-	BIN_DESC("nmalloc", "nmalloc", 14, uint64, STATS_COL_FLAG_NONE,
-	    nmalloc),
-	BIN_DESC("nmalloc_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE,
-	    nmalloc_ps),
-	BIN_DESC("ndalloc", "ndalloc", 14, uint64, STATS_COL_FLAG_NONE,
-	    ndalloc),
-	BIN_DESC("ndalloc_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE,
-	    ndalloc_ps),
-	BIN_DESC("nrequests", "nrequests", 15, uint64, STATS_COL_FLAG_NONE,
-	    nrequests),
-	BIN_DESC("nrequests_ps", "(#/sec)", 10, uint64, STATS_COL_FLAG_NONE,
-	    nrequests_ps),
-	BIN_DESC("prof_live_requested", "prof_live_requested", 21, uint64,
-	    STATS_COL_FLAG_PROF, prof_live_requested),
-	BIN_DESC("prof_live_count", "prof_live_count", 17, uint64,
-	    STATS_COL_FLAG_PROF, prof_live_count),
-	BIN_DESC("prof_accum_requested", "prof_accum_requested", 21, uint64,
-	    STATS_COL_FLAG_PROF, prof_accum_requested),
-	BIN_DESC("prof_accum_count", "prof_accum_count", 17, uint64,
-	    STATS_COL_FLAG_PROF, prof_accum_count),
-	BIN_DESC("nshards", "nshards", 9, unsigned, STATS_COL_FLAG_NONE,
-	    nshards),
-	BIN_DESC("curregs", "curregs", 13, size, STATS_COL_FLAG_NONE, curregs),
-	BIN_DESC("curslabs", "curslabs", 13, size, STATS_COL_FLAG_NONE,
-	    curslabs),
-	BIN_DESC("nonfull_slabs", "nonfull_slabs", 15, size,
-	    STATS_COL_FLAG_NONE,
-	    nonfull_slabs),
-	BIN_DESC("regs", "regs", 5, unsigned, STATS_COL_FLAG_NONE, regs),
-	BIN_DESC("pgs", "pgs", 4, size, STATS_COL_FLAG_NONE, pgs),
-	BIN_DESC(NULL, " ", 1, title, STATS_COL_FLAG_NONE, spacer),
-	BIN_DESC("util", "util", 6, title, STATS_COL_FLAG_NONE, util),
-	BIN_DESC("nfills", "nfills", 13, uint64, STATS_COL_FLAG_NONE, nfills),
-	BIN_DESC("nfills_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE,
-	    nfills_ps),
-	BIN_DESC("nflushes", "nflushes", 13, uint64, STATS_COL_FLAG_NONE,
-	    nflushes),
-	BIN_DESC("nflushes_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE,
-	    nflushes_ps),
-	BIN_DESC("nslabs", "nslabs", 13, uint64, STATS_COL_FLAG_NONE, nslabs),
-	BIN_DESC("nreslabs", "nreslabs", 13, uint64, STATS_COL_FLAG_NONE,
-	    nreslabs),
-	BIN_DESC("nreslabs_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE,
-	    nreslabs_ps),
+    BIN_DESC("size", "size", 20, size, STATS_COL_FLAG_NONE, size),
+    BIN_DESC("ind", "ind", 4, unsigned, STATS_COL_FLAG_NONE, ind),
+    BIN_DESC(
+        "allocated", "allocated", 14, size, STATS_COL_FLAG_NONE, allocated),
+    BIN_DESC("nmalloc", "nmalloc", 14, uint64, STATS_COL_FLAG_NONE, nmalloc),
+    BIN_DESC(
+        "nmalloc_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE, nmalloc_ps),
+    BIN_DESC("ndalloc", "ndalloc", 14, uint64, STATS_COL_FLAG_NONE, ndalloc),
+    BIN_DESC(
+        "ndalloc_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE, ndalloc_ps),
+    BIN_DESC(
+        "nrequests", "nrequests", 15, uint64, STATS_COL_FLAG_NONE, nrequests),
+    BIN_DESC("nrequests_ps", "(#/sec)", 10, uint64, STATS_COL_FLAG_NONE,
+        nrequests_ps),
+    BIN_DESC("prof_live_requested", "prof_live_requested", 21, uint64,
+        STATS_COL_FLAG_PROF, prof_live_requested),
+    BIN_DESC("prof_live_count", "prof_live_count", 17, uint64,
+        STATS_COL_FLAG_PROF, prof_live_count),
+    BIN_DESC("prof_accum_requested", "prof_accum_requested", 21, uint64,
+        STATS_COL_FLAG_PROF, prof_accum_requested),
+    BIN_DESC("prof_accum_count", "prof_accum_count", 17, uint64,
+        STATS_COL_FLAG_PROF, prof_accum_count),
+    BIN_DESC("nshards", "nshards", 9, unsigned, STATS_COL_FLAG_NONE, nshards),
+    BIN_DESC("curregs", "curregs", 13, size, STATS_COL_FLAG_NONE, curregs),
+    BIN_DESC("curslabs", "curslabs", 13, size, STATS_COL_FLAG_NONE, curslabs),
+    BIN_DESC("nonfull_slabs", "nonfull_slabs", 15, size, STATS_COL_FLAG_NONE,
+        nonfull_slabs),
+    BIN_DESC("regs", "regs", 5, unsigned, STATS_COL_FLAG_NONE, regs),
+    BIN_DESC("pgs", "pgs", 4, size, STATS_COL_FLAG_NONE, pgs),
+    BIN_DESC(NULL, " ", 1, title, STATS_COL_FLAG_NONE, spacer),
+    BIN_DESC("util", "util", 6, title, STATS_COL_FLAG_NONE, util),
+    BIN_DESC("nfills", "nfills", 13, uint64, STATS_COL_FLAG_NONE, nfills),
+    BIN_DESC("nfills_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE, nfills_ps),
+    BIN_DESC("nflushes", "nflushes", 13, uint64, STATS_COL_FLAG_NONE, nflushes),
+    BIN_DESC(
+        "nflushes_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE, nflushes_ps),
+    BIN_DESC("nslabs", "nslabs", 13, uint64, STATS_COL_FLAG_NONE, nslabs),
+    BIN_DESC("nreslabs", "nreslabs", 13, uint64, STATS_COL_FLAG_NONE, nreslabs),
+    BIN_DESC(
+        "nreslabs_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE, nreslabs_ps),
 };
 #undef BIN_DESC
 #define BIN_COL_COUNT (sizeof(stats_bin_cols) / sizeof(stats_bin_cols[0]))
@@ -849,8 +856,8 @@ stats_emit_arena_bin_row(emitter_t *emitter, emitter_row_t *table_row,
 	emitter_col_table_fill(
 	    stats_bin_cols, BIN_COL_COUNT, active_flags, cols, row);
 	emitter_json_object_begin(emitter);
-	emitter_col_table_emit_json(emitter, stats_bin_cols, BIN_COL_COUNT,
-	    active_flags, cols);
+	emitter_col_table_emit_json(
+	    emitter, stats_bin_cols, BIN_COL_COUNT, active_flags, cols);
 	if (mutex) {
 		emitter_json_object_kv_begin(emitter, "mutex");
 		mutex_stats_emit(emitter, NULL, mutex64, mutex32);
@@ -898,8 +905,8 @@ stats_arena_bins_print(
 		    &header_row, NULL, NULL, header_mutex64, header_mutex32);
 	}
 
-	emitter_col_table_header(emitter, &header_row,
-	    &header_cols[BIN_COL_SIZE], "bins:", "bins");
+	emitter_col_table_header(
+	    emitter, &header_row, &header_cols[BIN_COL_SIZE], "bins:", "bins");
 
 	size_t stats_arenas_mib[CTL_MAX_DEPTH];
 	CTL_LEAF_PREPARE(stats_arenas_mib, 0, "stats.arenas");
@@ -985,18 +992,18 @@ typedef struct {
 	uint64_t                     uptime;
 } stats_arena_lextent_emit_row_t;
 
-#define LEXTENT_COL_GET(name, value_member, field)                            \
-	static void                                                            \
-	stats_lextent_col_get_##name(const void *vrow, emitter_col_t *col) {    \
-		const stats_arena_lextent_emit_row_t *row = vrow;                \
-		col->value_member = row->lextent->field;                          \
+#define LEXTENT_COL_GET(name, value_member, field)                             \
+	static void stats_lextent_col_get_##name(                              \
+	    const void *vrow, emitter_col_t *col) {                            \
+		const stats_arena_lextent_emit_row_t *row = vrow;              \
+		col->value_member = row->lextent->field;                       \
 	}
-#define LEXTENT_COL_GET_RATE(name, field)                                     \
-	static void                                                            \
-	stats_lextent_col_get_##name(const void *vrow, emitter_col_t *col) {    \
-		const stats_arena_lextent_emit_row_t *row = vrow;                \
-		col->uint64_val = rate_per_second(                               \
-		    row->lextent->field, row->uptime);                            \
+#define LEXTENT_COL_GET_RATE(name, field)                                      \
+	static void stats_lextent_col_get_##name(                              \
+	    const void *vrow, emitter_col_t *col) {                            \
+		const stats_arena_lextent_emit_row_t *row = vrow;              \
+		col->uint64_val = rate_per_second(                             \
+		    row->lextent->field, row->uptime);                         \
 	}
 LEXTENT_COL_GET(size, size_val, lextent_size)
 LEXTENT_COL_GET(nmalloc, uint64_val, nmalloc)
@@ -1027,38 +1034,36 @@ stats_lextent_col_get_allocated(const void *vrow, emitter_col_t *col) {
 
 #define LEXTENT_COL_SIZE 0
 
-#define LEXTENT_DESC(key, label, width, type, flags, name)                    \
-	{key, label, emitter_justify_right, width, emitter_type_##type, flags,   \
+#define LEXTENT_DESC(key, label, width, type, flags, name)                     \
+	{key, label, emitter_justify_right, width, emitter_type_##type, flags, \
 	    stats_lextent_col_get_##name}
 static const emitter_col_desc_t stats_lextent_cols[] = {
-	LEXTENT_DESC("size", "size", 20, size, STATS_COL_FLAG_NONE, size),
-	LEXTENT_DESC("ind", "ind", 4, unsigned, STATS_COL_FLAG_NONE, ind),
-	LEXTENT_DESC("allocated", "allocated", 13, size, STATS_COL_FLAG_NONE,
-	    allocated),
-	LEXTENT_DESC("nmalloc", "nmalloc", 13, uint64, STATS_COL_FLAG_NONE,
-	    nmalloc),
-	LEXTENT_DESC("nmalloc_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE,
-	    nmalloc_ps),
-	LEXTENT_DESC("ndalloc", "ndalloc", 13, uint64, STATS_COL_FLAG_NONE,
-	    ndalloc),
-	LEXTENT_DESC("ndalloc_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE,
-	    ndalloc_ps),
-	LEXTENT_DESC("nrequests", "nrequests", 13, uint64,
-	    STATS_COL_FLAG_NONE,
-	    nrequests),
-	LEXTENT_DESC("nrequests_ps", "(#/sec)", 8, uint64,
-	    STATS_COL_FLAG_NONE,
-	    nrequests_ps),
-	LEXTENT_DESC("prof_live_requested", "prof_live_requested", 21, uint64,
-	    STATS_COL_FLAG_PROF, prof_live_requested),
-	LEXTENT_DESC("prof_live_count", "prof_live_count", 17, uint64,
-	    STATS_COL_FLAG_PROF, prof_live_count),
-	LEXTENT_DESC("prof_accum_requested", "prof_accum_requested", 21,
-	    uint64, STATS_COL_FLAG_PROF, prof_accum_requested),
-	LEXTENT_DESC("prof_accum_count", "prof_accum_count", 17, uint64,
-	    STATS_COL_FLAG_PROF, prof_accum_count),
-	LEXTENT_DESC("curlextents", "curlextents", 13, size,
-	    STATS_COL_FLAG_NONE, curlextents),
+    LEXTENT_DESC("size", "size", 20, size, STATS_COL_FLAG_NONE, size),
+    LEXTENT_DESC("ind", "ind", 4, unsigned, STATS_COL_FLAG_NONE, ind),
+    LEXTENT_DESC(
+        "allocated", "allocated", 13, size, STATS_COL_FLAG_NONE, allocated),
+    LEXTENT_DESC(
+        "nmalloc", "nmalloc", 13, uint64, STATS_COL_FLAG_NONE, nmalloc),
+    LEXTENT_DESC(
+        "nmalloc_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE, nmalloc_ps),
+    LEXTENT_DESC(
+        "ndalloc", "ndalloc", 13, uint64, STATS_COL_FLAG_NONE, ndalloc),
+    LEXTENT_DESC(
+        "ndalloc_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE, ndalloc_ps),
+    LEXTENT_DESC(
+        "nrequests", "nrequests", 13, uint64, STATS_COL_FLAG_NONE, nrequests),
+    LEXTENT_DESC("nrequests_ps", "(#/sec)", 8, uint64, STATS_COL_FLAG_NONE,
+        nrequests_ps),
+    LEXTENT_DESC("prof_live_requested", "prof_live_requested", 21, uint64,
+        STATS_COL_FLAG_PROF, prof_live_requested),
+    LEXTENT_DESC("prof_live_count", "prof_live_count", 17, uint64,
+        STATS_COL_FLAG_PROF, prof_live_count),
+    LEXTENT_DESC("prof_accum_requested", "prof_accum_requested", 21, uint64,
+        STATS_COL_FLAG_PROF, prof_accum_requested),
+    LEXTENT_DESC("prof_accum_count", "prof_accum_count", 17, uint64,
+        STATS_COL_FLAG_PROF, prof_accum_count),
+    LEXTENT_DESC("curlextents", "curlextents", 13, size, STATS_COL_FLAG_NONE,
+        curlextents),
 };
 #undef LEXTENT_DESC
 #define LEXTENT_COL_COUNT                                                      \
@@ -1067,14 +1072,14 @@ static const emitter_col_desc_t stats_lextent_cols[] = {
 static void
 stats_emit_arena_lextent_row(emitter_t *emitter, emitter_row_t *table_row,
     emitter_col_t *cols, const stats_arena_lextent_emit_row_t *row,
-    bool prof_stats_on, size_t prev_size, char *size_buf,
-    size_t size_buf_size, bool is_gap) {
+    bool prof_stats_on, size_t prev_size, char *size_buf, size_t size_buf_size,
+    bool is_gap) {
 	unsigned active_flags = stats_col_active_flags(prof_stats_on);
-	emitter_col_table_fill(stats_lextent_cols, LEXTENT_COL_COUNT,
-	    active_flags, cols, row);
+	emitter_col_table_fill(
+	    stats_lextent_cols, LEXTENT_COL_COUNT, active_flags, cols, row);
 	emitter_json_object_begin(emitter);
-	emitter_col_table_emit_json(emitter, stats_lextent_cols,
-	    LEXTENT_COL_COUNT, active_flags, cols);
+	emitter_col_table_emit_json(
+	    emitter, stats_lextent_cols, LEXTENT_COL_COUNT, active_flags, cols);
 	emitter_json_object_end(emitter);
 	stats_size_col_set(&cols[LEXTENT_COL_SIZE], row->lextent->lextent_size,
 	    prev_size, size_buf, size_buf_size);
@@ -1094,7 +1099,7 @@ stats_arena_lextents_print(emitter_t *emitter, unsigned i, uint64_t uptime) {
 	    && i == MALLCTL_ARENAS_ALL;
 	emitter_row_t row, header_row;
 	emitter_col_t cols[LEXTENT_COL_COUNT], header_cols[LEXTENT_COL_COUNT];
-	char size_buf[48];
+	char          size_buf[48];
 	emitter_col_table_build(stats_lextent_cols, LEXTENT_COL_COUNT,
 	    stats_col_active_flags(prof_stats_on), &row, cols, &header_row,
 	    header_cols);
@@ -1134,7 +1139,8 @@ stats_arena_lextents_print(emitter_t *emitter, unsigned i, uint64_t uptime) {
 		stats_arena_lextent_emit_row_t emit_row = {
 		    &lext, nbins + j, uptime};
 		stats_emit_arena_lextent_row(emitter, &row, cols, &emit_row,
-		    prof_stats_on, prev_size, size_buf, sizeof(size_buf), is_gap);
+		    prof_stats_on, prev_size, size_buf, sizeof(size_buf),
+		    is_gap);
 		prev_size = lext.lextent_size;
 	}
 	emitter_json_array_end(emitter); /* Close "lextents". */
@@ -1147,11 +1153,11 @@ typedef struct {
 	size_t                      size;
 } stats_arena_extent_emit_row_t;
 
-#define EXTENT_COL_GET(name, field)                                           \
-	static void                                                            \
-	stats_extent_col_get_##name(const void *vrow, emitter_col_t *col) {     \
-		const stats_arena_extent_emit_row_t *row = vrow;                 \
-		col->size_val = row->extent->field;                              \
+#define EXTENT_COL_GET(name, field)                                            \
+	static void stats_extent_col_get_##name(                               \
+	    const void *vrow, emitter_col_t *col) {                            \
+		const stats_arena_extent_emit_row_t *row = vrow;               \
+		col->size_val = row->extent->field;                            \
 	}
 EXTENT_COL_GET(ndirty, ndirty)
 EXTENT_COL_GET(dirty, dirty_bytes)
@@ -1179,24 +1185,24 @@ stats_extent_col_get_ind(const void *vrow, emitter_col_t *col) {
 
 #define EXTENT_COL_SIZE 0
 
-#define EXTENT_DESC(key, label, name)                                         \
-	{key, label, emitter_justify_right, 13, emitter_type_size,               \
+#define EXTENT_DESC(key, label, name)                                          \
+	{key, label, emitter_justify_right, 13, emitter_type_size,             \
 	    STATS_COL_FLAG_NONE, stats_extent_col_get_##name}
 static const emitter_col_desc_t stats_extent_cols[] = {
-	{"size", "size", emitter_justify_right, 20, emitter_type_size,
-	    STATS_COL_FLAG_NONE, stats_extent_col_get_size},
-	{"ind", "ind", emitter_justify_right, 4, emitter_type_unsigned,
-	    STATS_COL_FLAG_NONE, stats_extent_col_get_ind},
-	EXTENT_DESC("ndirty", "ndirty", ndirty),
-	EXTENT_DESC("dirty_bytes", "dirty", dirty),
-	EXTENT_DESC("nmuzzy", "nmuzzy", nmuzzy),
-	EXTENT_DESC("muzzy_bytes", "muzzy", muzzy),
-	EXTENT_DESC("nretained", "nretained", nretained),
-	EXTENT_DESC("retained_bytes", "retained", retained),
-	EXTENT_DESC("npinned", "npinned", npinned),
-	EXTENT_DESC("pinned_bytes", "pinned", pinned),
-	EXTENT_DESC("ntotal", "ntotal", ntotal),
-	EXTENT_DESC("total_bytes", "total", total),
+    {"size", "size", emitter_justify_right, 20, emitter_type_size,
+        STATS_COL_FLAG_NONE, stats_extent_col_get_size},
+    {"ind", "ind", emitter_justify_right, 4, emitter_type_unsigned,
+        STATS_COL_FLAG_NONE, stats_extent_col_get_ind},
+    EXTENT_DESC("ndirty", "ndirty", ndirty),
+    EXTENT_DESC("dirty_bytes", "dirty", dirty),
+    EXTENT_DESC("nmuzzy", "nmuzzy", nmuzzy),
+    EXTENT_DESC("muzzy_bytes", "muzzy", muzzy),
+    EXTENT_DESC("nretained", "nretained", nretained),
+    EXTENT_DESC("retained_bytes", "retained", retained),
+    EXTENT_DESC("npinned", "npinned", npinned),
+    EXTENT_DESC("pinned_bytes", "pinned", pinned),
+    EXTENT_DESC("ntotal", "ntotal", ntotal),
+    EXTENT_DESC("total_bytes", "total", total),
 };
 #undef EXTENT_DESC
 #define EXTENT_COL_COUNT                                                       \
@@ -1209,8 +1215,8 @@ stats_emit_arena_extent_row(emitter_t *emitter, emitter_row_t *table_row,
 	emitter_col_table_fill(stats_extent_cols, EXTENT_COL_COUNT,
 	    STATS_COL_FLAG_NONE, cols, row);
 	emitter_json_object_begin(emitter);
-	emitter_col_table_emit_json(emitter, stats_extent_cols, EXTENT_COL_COUNT,
-	    STATS_COL_FLAG_NONE, cols);
+	emitter_col_table_emit_json(emitter, stats_extent_cols,
+	    EXTENT_COL_COUNT, STATS_COL_FLAG_NONE, cols);
 	emitter_json_object_end(emitter);
 	stats_size_col_set(&cols[EXTENT_COL_SIZE], row->size, prev_size,
 	    size_buf, size_buf_size);
@@ -1224,7 +1230,7 @@ stats_arena_extents_print(emitter_t *emitter, unsigned i) {
 	unsigned      j;
 	emitter_row_t row, header_row;
 	emitter_col_t cols[EXTENT_COL_COUNT], header_cols[EXTENT_COL_COUNT];
-	char size_buf[48];
+	char          size_buf[48];
 	emitter_col_table_build(stats_extent_cols, EXTENT_COL_COUNT,
 	    STATS_COL_FLAG_NONE, &row, cols, &header_row, header_cols);
 	emitter_col_table_header(emitter, &header_row,
@@ -1281,8 +1287,9 @@ static void
 stats_emit_arena_pac_sec(emitter_t *emitter, const stats_arena_pac_sec_t *sec) {
 	emitter_kv(emitter, "pac_sec_bytes", "Bytes in PAC small extent cache",
 	    emitter_type_size, &sec->sec_bytes);
-	emitter_kv(emitter, "pac_sec_hits", "Total hits in PAC small extent cache",
-	    emitter_type_size, &sec->sec_hits);
+	emitter_kv(emitter, "pac_sec_hits",
+	    "Total hits in PAC small extent cache", emitter_type_size,
+	    &sec->sec_hits);
 	emitter_kv(emitter, "pac_sec_misses",
 	    "Total misses in PAC small extent cache", emitter_type_size,
 	    &sec->sec_misses);
@@ -1302,20 +1309,20 @@ stats_arena_pac_sec_print(emitter_t *emitter, unsigned i) {
 }
 
 static void
-stats_emit_arena_hpa_counters(emitter_t *emitter,
-    const stats_arena_hpa_counters_t *c, uint64_t uptime) {
+stats_emit_arena_hpa_counters(
+    emitter_t *emitter, const stats_arena_hpa_counters_t *c, uint64_t uptime) {
 	/* Merged pageslab / page counts (broken down by huginess below). */
 	emitter_kv(emitter, "npageslabs", "npageslabs", emitter_type_size,
 	    &c->npageslabs);
-	emitter_kv(emitter, "nactive", "nactive", emitter_type_size,
-	    &c->nactive);
+	emitter_kv(
+	    emitter, "nactive", "nactive", emitter_type_size, &c->nactive);
 	emitter_kv(emitter, "ndirty", "ndirty", emitter_type_size, &c->ndirty);
 
 	uint64_t npurge_passes_ps = rate_per_second(c->npurge_passes, uptime);
 	uint64_t npurges_ps = rate_per_second(c->npurges, uptime);
 	uint64_t nhugifies_ps = rate_per_second(c->nhugifies, uptime);
-	uint64_t nhugify_failures_ps =
-	    rate_per_second(c->nhugify_failures, uptime);
+	uint64_t nhugify_failures_ps = rate_per_second(
+	    c->nhugify_failures, uptime);
 	uint64_t ndehugifies_ps = rate_per_second(c->ndehugifies, uptime);
 	emitter_kv_note(emitter, "npurge_passes", "npurge_passes",
 	    emitter_type_uint64, &c->npurge_passes, "per_sec",
@@ -1390,18 +1397,16 @@ stats_arena_hpa_shard_counters_print(
 	}
 
 	emitter_table_printf(emitter, "  extent allocation distribution:\n");
-	emitter_table_printf(emitter,
-	    "  %4s %20s %20s %20s %20s %20s %20s\n", "",
-	    "min_extents", "max_extents",
-	    "extents", "ps", "pages_per_ps", "extents_per_ps");
+	emitter_table_printf(emitter, "  %4s %20s %20s %20s %20s %20s %20s\n",
+	    "", "min_extents", "max_extents", "extents", "ps", "pages_per_ps",
+	    "extents_per_ps");
 	for (size_t j = 0; j <= SEC_MAX_NALLOCS; j += 1) {
 		emitter_table_printf(emitter,
 		    "  %4zu %20" FMTu64 " %20" FMTu64 " %20" FMTu64
 		    " %20" FMTu64 " %20" FMTu64 " %20" FMTu64 "\n",
 		    j, hpa_alloc_min_extents[j], hpa_alloc_max_extents[j],
-		    hpa_alloc_extents[j],
-		    hpa_alloc_ps[j], hpa_alloc_pages_per_ps[j],
-		    hpa_alloc_extents_per_ps[j]);
+		    hpa_alloc_extents[j], hpa_alloc_ps[j],
+		    hpa_alloc_pages_per_ps[j], hpa_alloc_extents_per_ps[j]);
 	}
 	emitter_table_printf(emitter, "\n");
 
@@ -1433,11 +1438,11 @@ typedef struct {
 	unsigned                      ind;
 } stats_arena_hpa_slab_emit_row_t;
 
-#define HPA_SLAB_COL_GET(name)                                                \
-	static void                                                            \
-	stats_hpa_slab_col_get_##name(const void *vrow, emitter_col_t *col) {   \
-		const stats_arena_hpa_slab_emit_row_t *row = vrow;               \
-		col->size_val = row->slab->name;                                 \
+#define HPA_SLAB_COL_GET(name)                                                 \
+	static void stats_hpa_slab_col_get_##name(                             \
+	    const void *vrow, emitter_col_t *col) {                            \
+		const stats_arena_hpa_slab_emit_row_t *row = vrow;             \
+		col->size_val = row->slab->name;                               \
 	}
 HPA_SLAB_COL_GET(npageslabs_huge)
 HPA_SLAB_COL_GET(nactive_huge)
@@ -1472,31 +1477,31 @@ stats_hpa_slab_col_get_ind(const void *vrow, emitter_col_t *col) {
 
 #define HPA_SLAB_COL_SIZE 0
 
-#define HPA_SLAB_DESC(name, width)                                            \
-	{#name, #name, emitter_justify_right, width, emitter_type_size,          \
+#define HPA_SLAB_DESC(name, width)                                             \
+	{#name, #name, emitter_justify_right, width, emitter_type_size,        \
 	    STATS_COL_FLAG_NONE, stats_hpa_slab_col_get_##name}
 static const emitter_col_desc_t stats_hpa_slab_cols[] = {
-	{"size", "size", emitter_justify_right, 20, emitter_type_size,
-	    STATS_COL_FLAG_NONE, stats_hpa_slab_col_get_size},
-	{"ind", "ind", emitter_justify_right, 4, emitter_type_unsigned,
-	    STATS_COL_FLAG_NONE, stats_hpa_slab_col_get_ind},
-	HPA_SLAB_DESC(npageslabs_huge, 16),
-	HPA_SLAB_DESC(nactive_huge, 16),
-	HPA_SLAB_DESC(ndirty_huge, 16),
-	HPA_SLAB_DESC(npageslabs_nonhuge, 20),
-	HPA_SLAB_DESC(nactive_nonhuge, 20),
-	HPA_SLAB_DESC(ndirty_nonhuge, 20),
-	HPA_SLAB_DESC(nretained_nonhuge, 20),
+    {"size", "size", emitter_justify_right, 20, emitter_type_size,
+        STATS_COL_FLAG_NONE, stats_hpa_slab_col_get_size},
+    {"ind", "ind", emitter_justify_right, 4, emitter_type_unsigned,
+        STATS_COL_FLAG_NONE, stats_hpa_slab_col_get_ind},
+    HPA_SLAB_DESC(npageslabs_huge, 16),
+    HPA_SLAB_DESC(nactive_huge, 16),
+    HPA_SLAB_DESC(ndirty_huge, 16),
+    HPA_SLAB_DESC(npageslabs_nonhuge, 20),
+    HPA_SLAB_DESC(nactive_nonhuge, 20),
+    HPA_SLAB_DESC(ndirty_nonhuge, 20),
+    HPA_SLAB_DESC(nretained_nonhuge, 20),
 };
 #undef HPA_SLAB_DESC
 #define HPA_SLAB_COL_COUNT                                                     \
 	(sizeof(stats_hpa_slab_cols) / sizeof(stats_hpa_slab_cols[0]))
 
 static void
-stats_emit_arena_hpa_slab_row(emitter_t *emitter,
-    emitter_row_t *table_row, emitter_col_t *cols,
-    const stats_arena_hpa_slab_emit_row_t *row, const char *json_key,
-    char *size_buf, size_t size_buf_size, bool sparse, bool is_gap) {
+stats_emit_arena_hpa_slab_row(emitter_t *emitter, emitter_row_t *table_row,
+    emitter_col_t *cols, const stats_arena_hpa_slab_emit_row_t *row,
+    const char *json_key, char *size_buf, size_t size_buf_size, bool sparse,
+    bool is_gap) {
 	emitter_col_table_fill(stats_hpa_slab_cols, HPA_SLAB_COL_COUNT,
 	    STATS_COL_FLAG_NONE, cols, row);
 	if (json_key != NULL) {
@@ -1523,7 +1528,7 @@ stats_arena_hpa_shard_slabs_print(emitter_t *emitter, unsigned i) {
 	emitter_row_t row, header_row;
 	emitter_col_t cols[HPA_SLAB_COL_COUNT];
 	emitter_col_t header_cols[HPA_SLAB_COL_COUNT];
-	char size_buf[48];
+	char          size_buf[48];
 	emitter_col_table_build(stats_hpa_slab_cols, HPA_SLAB_COL_COUNT,
 	    STATS_COL_FLAG_NONE, &row, cols, &header_row, header_cols);
 
@@ -1537,15 +1542,13 @@ stats_arena_hpa_shard_slabs_print(emitter_t *emitter, unsigned i) {
 	 */
 	stats_arena_hpa_slab_t sfull;
 	stats_gather_arena_hpa_slab(i, "full_slabs", &sfull);
-	stats_arena_hpa_slab_emit_row_t full_row = {
-	    &sfull, "full", 0, 0, 0};
+	stats_arena_hpa_slab_emit_row_t full_row = {&sfull, "full", 0, 0, 0};
 	stats_emit_arena_hpa_slab_row(emitter, &row, cols, &full_row,
 	    "full_slabs", size_buf, sizeof(size_buf), false, false);
 
 	stats_arena_hpa_slab_t sempty;
 	stats_gather_arena_hpa_slab(i, "empty_slabs", &sempty);
-	stats_arena_hpa_slab_emit_row_t empty_row = {
-	    &sempty, "empty", 0, 0, 0};
+	stats_arena_hpa_slab_emit_row_t empty_row = {&sempty, "empty", 0, 0, 0};
 	stats_emit_arena_hpa_slab_row(emitter, &row, cols, &empty_row,
 	    "empty_slabs", size_buf, sizeof(size_buf), false, false);
 
@@ -1560,11 +1563,11 @@ stats_arena_hpa_shard_slabs_print(emitter_t *emitter, unsigned i) {
 		stats_arena_hpa_slab_t s;
 		stats_gather_arena_hpa_nonfull(stats_arenas_mib, j, &s);
 
-		bool is_gap = (s.npageslabs_huge == 0 && s.npageslabs_nonhuge == 0);
+		bool is_gap = (s.npageslabs_huge == 0
+		    && s.npageslabs_nonhuge == 0);
 
 		stats_arena_hpa_slab_emit_row_t emit_row = {
-		    &s, NULL, sz_pind2sz(j),
-		    j > 0 ? sz_pind2sz(j - 1) : 0, j};
+		    &s, NULL, sz_pind2sz(j), j > 0 ? sz_pind2sz(j - 1) : 0, j};
 		stats_emit_arena_hpa_slab_row(emitter, &row, cols, &emit_row,
 		    NULL, size_buf, sizeof(size_buf), true, is_gap);
 	}
@@ -1626,8 +1629,8 @@ stats_emit_arena_basics(emitter_t *emitter, const stats_arena_basics_t *b) {
 	}
 	emitter_kv(emitter, "nthreads", "assigned threads",
 	    emitter_type_unsigned, &b->nthreads);
-	emitter_kv(emitter, "uptime_ns", "uptime", emitter_type_uint64,
-	    &b->uptime);
+	emitter_kv(
+	    emitter, "uptime_ns", "uptime", emitter_type_uint64, &b->uptime);
 	emitter_kv(emitter, "dss", "dss allocation precedence",
 	    emitter_type_string, &b->dss);
 }
@@ -1888,8 +1891,8 @@ stats_arena_alloc_print(emitter_t *emitter, unsigned i, uint64_t uptime) {
 }
 
 static void
-stats_emit_arena_mem(emitter_t *emitter, const stats_arena_mem_t *mem,
-    size_t active_bytes) {
+stats_emit_arena_mem(
+    emitter_t *emitter, const stats_arena_mem_t *mem, size_t active_bytes) {
 	emitter_row_t mem_count_row;
 	emitter_row_init(&mem_count_row);
 
@@ -2185,9 +2188,9 @@ stats_general_opts(emitter_t *emitter) {
 static void
 stats_general_prof(emitter_t *emitter) {
 	if (config_prof) {
-		bool bv;
+		bool     bv;
 		uint64_t u64v;
-		ssize_t ssv;
+		ssize_t  ssv;
 
 		emitter_dict_begin(emitter, "prof", "Profiling settings");
 
@@ -2229,10 +2232,12 @@ stats_general_bin_meta_print(emitter_t *emitter, unsigned nbins) {
 		stats_gather_arena_bin_meta(mib, i, &bm);
 		emitter_json_object_begin(emitter);
 		emitter_json_kv(emitter, "size", emitter_type_size, &bm.size);
-		emitter_json_kv(emitter, "nregs", emitter_type_uint32, &bm.nregs);
+		emitter_json_kv(
+		    emitter, "nregs", emitter_type_uint32, &bm.nregs);
 		emitter_json_kv(
 		    emitter, "slab_size", emitter_type_size, &bm.slab_size);
-		emitter_json_kv(emitter, "nshards", emitter_type_uint32, &bm.nshards);
+		emitter_json_kv(
+		    emitter, "nshards", emitter_type_uint32, &bm.nshards);
 		emitter_json_object_end(emitter);
 	}
 	emitter_json_array_end(emitter); /* Close "bin". */
@@ -2325,7 +2330,7 @@ stats_general_print(emitter_t *emitter, bool omit_size_class_meta) {
 }
 
 static void
-stats_emit_global(emitter_t *emitter, const stats_global_t *g) {
+stats_emit_global(emitter_t *emitter, const stats_global_t *g, bool hpa) {
 	/* Generic global stats. */
 	emitter_json_kv(emitter, "allocated", emitter_type_size, &g->allocated);
 	emitter_json_kv(emitter, "active", emitter_type_size, &g->active);
@@ -2354,6 +2359,41 @@ stats_emit_global(emitter_t *emitter, const stats_global_t *g) {
 	/* Strange behaviors */
 	emitter_table_printf(emitter,
 	    "Count of realloc(non-null-ptr, 0) calls: %zu\n", g->zero_reallocs);
+
+	if (hpa && opt_hpa) {
+		const hpa_central_stats_t *h = &g->hpa_central;
+		emitter_json_object_kv_begin(emitter, "hpa_central");
+		emitter_json_kv(
+		    emitter, "nchunks", emitter_type_size, &h->nchunks);
+		emitter_json_kv(
+		    emitter, "nspare", emitter_type_size, &h->nspare);
+		emitter_json_kv(
+		    emitter, "nactive", emitter_type_size, &h->nactive);
+		emitter_json_kv(emitter, "nfree", emitter_type_size, &h->nfree);
+		emitter_json_kv(emitter, "nchunk_maps", emitter_type_uint64,
+		    &h->nchunk_maps);
+		emitter_json_kv(emitter, "nchunk_unmaps", emitter_type_uint64,
+		    &h->nchunk_unmaps);
+		emitter_json_kv(
+		    emitter, "nextracts", emitter_type_uint64, &h->nextracts);
+		emitter_json_kv(
+		    emitter, "nreuses", emitter_type_uint64, &h->nreuses);
+		emitter_json_kv(
+		    emitter, "ndallocs", emitter_type_uint64, &h->ndallocs);
+		emitter_json_kv(emitter, "ndalloc_purges", emitter_type_uint64,
+		    &h->ndalloc_purges);
+		emitter_json_object_end(emitter);
+
+		emitter_table_printf(emitter,
+		    "HPA central: chunks: %zu (spare %zu), hugepages active %zu, "
+		    "free %zu, maps/unmaps: %" FMTu64 "/%" FMTu64
+		    ", "
+		    "extracts: %" FMTu64 " (reused %" FMTu64
+		    "), returns: %" FMTu64 " (purged %" FMTu64 ")\n",
+		    h->nchunks, h->nspare, h->nactive, h->nfree, h->nchunk_maps,
+		    h->nchunk_unmaps, h->nextracts, h->nreuses, h->ndallocs,
+		    h->ndalloc_purges);
+	}
 
 	/* Background thread stats. */
 	emitter_json_object_kv_begin(emitter, "background_thread");
@@ -2392,8 +2432,8 @@ stats_global_mutexes_print(emitter_t *emitter) {
 	size_t stats_mutexes_mib[CTL_MAX_DEPTH];
 	CTL_LEAF_PREPARE(stats_mutexes_mib, 0, "stats.mutexes");
 	for (int i = 0; i < mutex_prof_num_global_mutexes; i++) {
-		mutex_stats_read(stats_mutexes_mib, 2,
-		    global_mutex_names[i], &name, col64, col32, uptime);
+		mutex_stats_read(stats_mutexes_mib, 2, global_mutex_names[i],
+		    &name, col64, col32, uptime);
 		emitter_json_object_kv_begin(emitter, global_mutex_names[i]);
 		mutex_stats_emit(emitter, &row, col64, col32);
 		emitter_json_object_end(emitter);
@@ -2403,12 +2443,12 @@ stats_global_mutexes_print(emitter_t *emitter) {
 }
 
 static void
-stats_print_globals(emitter_t *emitter, bool mutex) {
+stats_print_globals(emitter_t *emitter, bool mutex, bool hpa) {
 	stats_global_t g;
 	stats_gather_global(&g);
 
 	emitter_json_object_kv_begin(emitter, "stats");
-	stats_emit_global(emitter, &g);
+	stats_emit_global(emitter, &g, hpa);
 	if (mutex) {
 		stats_global_mutexes_print(emitter);
 	}
@@ -2429,7 +2469,7 @@ JEMALLOC_COLD
 static void
 stats_print_runtime_stats(emitter_t *emitter, bool merged, bool destroyed,
     bool unmerged, bool bins, bool large, bool mutex, bool extents, bool hpa) {
-	stats_print_globals(emitter, mutex);
+	stats_print_globals(emitter, mutex, hpa);
 
 	if (!merged && !destroyed && !unmerged) {
 		return;

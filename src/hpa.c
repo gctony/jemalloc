@@ -452,6 +452,36 @@ hpa_purge_finish_hp(
 	psset_update_end(&shard->psset, hp_item->hp);
 }
 
+static void
+hpa_return_clean_empties(
+    tsdn_t *tsdn, hpa_shard_t *shard, hpa_purge_batch_t *batch) {
+	malloc_mutex_assert_owner(tsdn, &shard->mtx);
+
+	size_t nreturn = 0;
+	for (size_t i = 0; i < batch->item_cnt; i++) {
+		hpdata_t *ps = batch->items[i].hp;
+		if (!hpdata_empty(ps) || hpdata_ntouched_get(ps) != 0
+		    || hpdata_changing_state_get(ps)
+		    || !hpdata_alloc_allowed_get(ps)) {
+			continue;
+		}
+		hpa_purge_item_t tmp = batch->items[nreturn];
+		batch->items[nreturn] = batch->items[i];
+		batch->items[i] = tmp;
+		psset_remove(&shard->psset, ps);
+		nreturn++;
+	}
+
+	if (nreturn == 0) {
+		return;
+	}
+	malloc_mutex_unlock(tsdn, &shard->mtx);
+	for (size_t i = 0; i < nreturn; i++) {
+		hpa_central_dalloc(tsdn, shard->central, batch->items[i].hp);
+	}
+	malloc_mutex_lock(tsdn, &shard->mtx);
+}
+
 /* Returns number of huge pages purged. */
 static inline size_t
 hpa_purge(tsdn_t *tsdn, hpa_shard_t *shard, size_t max_hp) {
@@ -500,6 +530,7 @@ hpa_purge(tsdn_t *tsdn, hpa_shard_t *shard, size_t max_hp) {
 		for (size_t i = 0; i < batch.item_cnt; ++i) {
 			hpa_purge_finish_hp(tsdn, shard, &batch.items[i]);
 		}
+		hpa_return_clean_empties(tsdn, shard, &batch);
 	}
 	malloc_mutex_assert_owner(tsdn, &shard->mtx);
 	shard->stats.npurge_passes++;
@@ -1182,7 +1213,7 @@ hpa_shard_destroy(tsdn_t *tsdn, hpa_shard_t *shard) {
 		/* There should be no allocations anywhere. */
 		assert(hpdata_empty(ps));
 		psset_remove(&shard->psset, ps);
-		shard->central->hooks.unmap(hpdata_addr_get(ps), HUGEPAGE);
+		hpa_central_dalloc(tsdn, shard->central, ps);
 	}
 }
 
