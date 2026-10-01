@@ -599,6 +599,22 @@ static const ctl_field_t background_thread_fields[] = {
 	{"run_interval", "run_interval", ctl_field_uint64},
 };
 
+static const ctl_field_t hpa_central_fields[] = {
+	{"nchunks", "nchunks", ctl_field_size},
+	{"nspare", "nspare", ctl_field_size},
+	{"nactive", "nactive", ctl_field_size},
+	{"nfree", "nfree", ctl_field_size},
+	{"nchunk_maps", "nchunk_maps", ctl_field_uint64},
+	{"nchunk_unmaps", "nchunk_unmaps", ctl_field_uint64},
+	{"nextracts", "nextracts", ctl_field_uint64},
+	{"nreuses", "nreuses", ctl_field_uint64},
+	{"ndallocs", "ndallocs", ctl_field_uint64},
+	{"ndalloc_purges", "ndalloc_purges", ctl_field_uint64},
+};
+static const char *const hpa_central_keys[] = {"nchunks", "nspare",
+	"nactive", "nfree", "nchunk_maps", "nchunk_unmaps", "nextracts",
+	"nreuses", "ndallocs", "ndalloc_purges"};
+
 static const ctl_field_t arena_fields[] = {
 	{"nthreads", "nthreads", ctl_field_unsigned},
 	{"uptime_ns", "uptime", ctl_field_uint64},
@@ -819,6 +835,7 @@ TEST_BEGIN(test_json_stats_arenas_and_options) {
 	    {"Jx", option_parent_stats, "mutexes"},
 	    {"Je", option_parent_merged, "extents"},
 	    {"Jh", option_parent_merged, "hpa_shard"},
+	    {"Jh", option_parent_stats, "hpa_central"},
 	    {"Jmda", option_parent_jemalloc, "stats.arenas"},
 	};
 	for (size_t i = 0; i < ARRAY_COUNT(cases); i++) {
@@ -846,7 +863,10 @@ TEST_BEGIN(test_json_stats_global_and_arena) {
 	    "metadata_edata", "metadata_rtree", "metadata_thp", "resident",
 	    "mapped", "retained", "pinned", "zero_reallocs",
 	    "background_thread", "mutexes"};
-	expect_json_object_keys(
+	expect_zu_eq(json_object_size(stats),
+	    ARRAY_COUNT(stats_keys) + (opt_hpa ? 1 : 0),
+	    "stats has an unexpected number of keys");
+	expect_json_object_has_keys(
 	    stats, stats_keys, ARRAY_COUNT(stats_keys), "stats");
 	expect_json_ctl_fields(
 	    stats, "stats", global_fields, ARRAY_COUNT(global_fields));
@@ -868,6 +888,18 @@ TEST_BEGIN(test_json_stats_global_and_arena) {
 			expect_json_uint_eq(background_thread,
 			    background_thread_keys[i], 0, "stats.background_thread");
 		}
+	}
+
+	json_fragment_t hpa_central;
+	bool hpa_central_missing = json_object_member(
+	    stats, "hpa_central", &hpa_central);
+	expect_b_eq(hpa_central_missing, !opt_hpa,
+	    "stats should contain hpa_central iff opt.hpa is enabled");
+	if (!hpa_central_missing) {
+		expect_json_object_keys(hpa_central, hpa_central_keys,
+		    ARRAY_COUNT(hpa_central_keys), "stats.hpa_central");
+		expect_json_ctl_fields(hpa_central, "stats.hpa_central",
+		    hpa_central_fields, ARRAY_COUNT(hpa_central_fields));
 	}
 
 	char arena_prefix[64];

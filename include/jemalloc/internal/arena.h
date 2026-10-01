@@ -221,6 +221,10 @@ bool     arena_init_huge(tsdn_t *tsdn, arena_t *a0);
 bool     arena_ind_is_huge(unsigned ind);
 arena_t *arena_choose_huge(tsd_t *tsd);
 bool   arena_boot(sc_data_t *sc_data, base_t *base, bool hpa);
+void     arena_hpa_central_stats_read(tsdn_t *tsdn, hpa_central_stats_t *stats);
+void     arena_hpa_central_prefork(tsdn_t *tsdn);
+void     arena_hpa_central_postfork_parent(tsdn_t *tsdn);
+void     arena_hpa_central_postfork_child(tsdn_t *tsdn);
 void  *arena_locality_hint(tsdn_t *tsdn, arena_t *arena, szind_t szind);
 void   arena_cache_bin_array_register(tsdn_t *tsdn, arena_t *arena,
        cache_bin_array_descriptor_t *desc);

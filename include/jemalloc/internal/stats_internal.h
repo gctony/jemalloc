@@ -253,6 +253,7 @@ typedef struct stats_global_s {
 	size_t   retained;
 	size_t   pinned;
 	size_t   zero_reallocs;
+	hpa_central_stats_t hpa_central;
 	size_t   num_background_threads;
 	uint64_t background_thread_num_runs;
 	uint64_t background_thread_run_interval;

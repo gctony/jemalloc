@@ -72,6 +72,9 @@ _malloc_prefork(void)
 	}
 	/* Break arena prefork into stages to preserve lock order. */
 	for (i = 0; i < 9; i++) {
+		if (i == 5) {
+			arena_hpa_central_prefork(tsd_tsdn(tsd));
+		}
 		for (j = 0; j < narenas; j++) {
 			if ((arena = arena_get(tsd_tsdn(tsd), j, false))
 			    != NULL) {
@@ -147,6 +150,7 @@ _malloc_postfork(void)
 			arena_postfork_parent(tsd_tsdn(tsd), arena);
 		}
 	}
+	arena_hpa_central_postfork_parent(tsd_tsdn(tsd));
 	prof_postfork_parent(tsd_tsdn(tsd));
 	if (have_background_thread) {
 		background_thread_postfork_parent(tsd_tsdn(tsd));
@@ -178,6 +182,7 @@ jemalloc_postfork_child(void) {
 			arena_postfork_child(tsd_tsdn(tsd), arena, desc);
 		}
 	}
+	arena_hpa_central_postfork_child(tsd_tsdn(tsd));
 	prof_postfork_child(tsd_tsdn(tsd));
 	if (have_background_thread) {
 		background_thread_postfork_child(tsd_tsdn(tsd));

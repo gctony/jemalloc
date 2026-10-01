@@ -461,6 +461,21 @@ stats_gather_global(stats_global_t *g) {
 	CTL_GET("stats.retained", &g->retained, size_t);
 	CTL_GET("stats.pinned", &g->pinned, size_t);
 	CTL_GET("stats.zero_reallocs", &g->zero_reallocs, size_t);
+	CTL_GET("stats.hpa_central.nchunks", &g->hpa_central.nchunks, size_t);
+	CTL_GET("stats.hpa_central.nspare", &g->hpa_central.nspare, size_t);
+	CTL_GET("stats.hpa_central.nactive", &g->hpa_central.nactive, size_t);
+	CTL_GET("stats.hpa_central.nfree", &g->hpa_central.nfree, size_t);
+	CTL_GET("stats.hpa_central.nchunk_maps", &g->hpa_central.nchunk_maps,
+	    uint64_t);
+	CTL_GET("stats.hpa_central.nchunk_unmaps",
+	    &g->hpa_central.nchunk_unmaps, uint64_t);
+	CTL_GET(
+	    "stats.hpa_central.nextracts", &g->hpa_central.nextracts, uint64_t);
+	CTL_GET("stats.hpa_central.nreuses", &g->hpa_central.nreuses, uint64_t);
+	CTL_GET(
+	    "stats.hpa_central.ndallocs", &g->hpa_central.ndallocs, uint64_t);
+	CTL_GET("stats.hpa_central.ndalloc_purges",
+	    &g->hpa_central.ndalloc_purges, uint64_t);
 
 	if (have_background_thread) {
 		CTL_GET("stats.background_thread.num_threads",
@@ -2327,7 +2342,7 @@ stats_general_print(emitter_t *emitter, bool omit_size_class_meta) {
 }
 
 static void
-stats_emit_global(emitter_t *emitter, const stats_global_t *g) {
+stats_emit_global(emitter_t *emitter, const stats_global_t *g, bool hpa) {
 	/* Generic global stats. */
 	emitter_json_kv(emitter, "allocated", emitter_type_size, &g->allocated);
 	emitter_json_kv(emitter, "active", emitter_type_size, &g->active);
@@ -2356,6 +2371,41 @@ stats_emit_global(emitter_t *emitter, const stats_global_t *g) {
 	/* Strange behaviors */
 	emitter_table_printf(emitter,
 	    "Count of realloc(non-null-ptr, 0) calls: %zu\n", g->zero_reallocs);
+
+	if (hpa && opt_hpa) {
+		const hpa_central_stats_t *h = &g->hpa_central;
+		emitter_json_object_kv_begin(emitter, "hpa_central");
+		emitter_json_kv(
+		    emitter, "nchunks", emitter_type_size, &h->nchunks);
+		emitter_json_kv(
+		    emitter, "nspare", emitter_type_size, &h->nspare);
+		emitter_json_kv(
+		    emitter, "nactive", emitter_type_size, &h->nactive);
+		emitter_json_kv(emitter, "nfree", emitter_type_size, &h->nfree);
+		emitter_json_kv(emitter, "nchunk_maps", emitter_type_uint64,
+		    &h->nchunk_maps);
+		emitter_json_kv(emitter, "nchunk_unmaps", emitter_type_uint64,
+		    &h->nchunk_unmaps);
+		emitter_json_kv(
+		    emitter, "nextracts", emitter_type_uint64, &h->nextracts);
+		emitter_json_kv(
+		    emitter, "nreuses", emitter_type_uint64, &h->nreuses);
+		emitter_json_kv(
+		    emitter, "ndallocs", emitter_type_uint64, &h->ndallocs);
+		emitter_json_kv(emitter, "ndalloc_purges", emitter_type_uint64,
+		    &h->ndalloc_purges);
+		emitter_json_object_end(emitter);
+
+		emitter_table_printf(emitter,
+		    "HPA central: chunks: %zu (spare %zu), hugepages active %zu, "
+		    "free %zu, maps/unmaps: %" FMTu64 "/%" FMTu64
+		    ", "
+		    "extracts: %" FMTu64 " (reused %" FMTu64
+		    "), returns: %" FMTu64 " (purged %" FMTu64 ")\n",
+		    h->nchunks, h->nspare, h->nactive, h->nfree, h->nchunk_maps,
+		    h->nchunk_unmaps, h->nextracts, h->nreuses, h->ndallocs,
+		    h->ndalloc_purges);
+	}
 
 	/* Background thread stats. */
 	emitter_json_object_kv_begin(emitter, "background_thread");
@@ -2405,12 +2455,12 @@ stats_global_mutexes_print(emitter_t *emitter) {
 }
 
 static void
-stats_print_globals(emitter_t *emitter, bool mutex) {
+stats_print_globals(emitter_t *emitter, bool mutex, bool hpa) {
 	stats_global_t g;
 	stats_gather_global(&g);
 
 	emitter_json_object_kv_begin(emitter, "stats");
-	stats_emit_global(emitter, &g);
+	stats_emit_global(emitter, &g, hpa);
 	if (mutex) {
 		stats_global_mutexes_print(emitter);
 	}
@@ -2431,7 +2481,7 @@ JEMALLOC_COLD
 static void
 stats_print_runtime_stats(emitter_t *emitter, bool merged, bool destroyed,
     bool unmerged, bool bins, bool large, bool mutex, bool extents, bool hpa) {
-	stats_print_globals(emitter, mutex);
+	stats_print_globals(emitter, mutex, hpa);
 
 	if (!merged && !destroyed && !unmerged) {
 		return;
