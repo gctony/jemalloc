@@ -22,6 +22,15 @@ struct test_data_s {
 	emap_t emap;
 };
 
+typedef struct shared_test_data_s shared_test_data_t;
+struct shared_test_data_s {
+	hpa_shard_t   shards[2];
+	hpa_central_t central;
+	base_t       *base;
+	edata_cache_t shard_edata_caches[2];
+	emap_t        emap;
+};
+
 static hpa_shard_opts_t test_hpa_shard_opts_default = {
     /* slab_max_alloc */
     ALLOC_MAX,
@@ -370,6 +379,47 @@ defer_test_curtime(nstime_t *r_time, bool first_reading) {
 static uint64_t
 defer_test_ms_since(nstime_t *past_time) {
 	return (nstime_ns(&defer_curtime) - nstime_ns(past_time)) / 1000 / 1000;
+}
+
+static shared_test_data_t *
+create_test_data_shared(const hpa_hooks_t *hooks, hpa_shard_opts_t *opts) {
+	shared_test_data_t *test_data = malloc(sizeof(*test_data));
+	assert_ptr_not_null(test_data, "Unexpected malloc failure");
+	test_data->base = base_new(TSDN_NULL, SHARD_IND,
+	    &ehooks_default_extent_hooks, /* metadata_use_hooks */ true);
+	assert_ptr_not_null(test_data->base, "Unexpected base_new failure");
+	assert_false(emap_init(&test_data->emap, test_data->base,
+	                 /* zeroed */ false),
+	    "Unexpected emap_init failure");
+	assert_false(
+	    hpa_central_init(&test_data->central, test_data->base, hooks),
+	    "Unexpected hpa_central_init failure");
+
+	sec_opts_t sec_opts;
+	sec_opts.nshards = 0;
+	tsdn_t *tsdn = tsd_tsdn(tsd_fetch());
+	for (unsigned i = 0; i < 2; i++) {
+		assert_false(edata_cache_init(&test_data->shard_edata_caches[i],
+		                 test_data->base),
+		    "Unexpected edata_cache_init failure");
+		assert_false(
+		    hpa_shard_init(tsdn, &test_data->shards[i],
+		        &test_data->central, &test_data->emap, test_data->base,
+		        &test_data->shard_edata_caches[i], SHARD_IND + i, opts,
+		        &sec_opts),
+		    "Unexpected hpa_shard_init failure");
+	}
+	return test_data;
+}
+
+static void
+destroy_test_data_shared(shared_test_data_t *test_data) {
+	tsdn_t *tsdn = tsd_tsdn(tsd_fetch());
+	hpa_shard_destroy(tsdn, &test_data->shards[1]);
+	hpa_shard_destroy(tsdn, &test_data->shards[0]);
+	base_delete(TSDN_NULL, test_data->base);
+	rtree_ctx_data_init(tsd_rtree_ctx(tsd_fetch()));
+	free(test_data);
 }
 
 TEST_BEGIN(test_defer_time) {
@@ -853,7 +903,13 @@ TEST_BEGIN(test_starts_huge) {
 	psset_stats_t *stat = &shard->psset.stats;
 	expect_zu_eq(
 	    stat->empty_slabs[1].npageslabs, 0, "Expected zero huge slabs");
-	expect_zu_eq(stat->empty_slabs[0].npageslabs, 1, "Expected 1 nh slab");
+	expect_zu_eq(stat->empty_slabs[0].npageslabs, 0,
+	    "Purged empty slab should return to the central pool");
+	hpa_central_stats_t central_stats;
+	hpa_central_stats_read(
+	    tsdn, &((test_data_t *)shard)->central, &central_stats);
+	expect_u64_eq(1, central_stats.ndallocs,
+	    "Purged empty slab should count as a return");
 	expect_zu_eq(stat->full_slabs[0].npageslabs, 0, "");
 	expect_zu_eq(stat->full_slabs[1].npageslabs, 0, "");
 	expect_zu_eq(
@@ -869,6 +925,10 @@ TEST_BEGIN(test_starts_huge) {
 	    false, false, &deferred_work_generated);
 	expect_ptr_not_null(edatas[1], "Unexpected null edata");
 	expect_false(deferred_work_generated, "No page is purgable");
+	hpa_central_stats_read(
+	    tsdn, &((test_data_t *)shard)->central, &central_stats);
+	expect_u64_eq(1, central_stats.nreuses,
+	    "The returned pageslab should be recycled");
 
 	expect_zu_eq(stat->empty_slabs[1].npageslabs, 0, "");
 	expect_zu_eq(stat->empty_slabs[0].npageslabs, 0, "");
@@ -974,6 +1034,11 @@ TEST_BEGIN(test_start_huge_purge_empty_only) {
 	expect_true(deferred_work_generated, "");
 	expect_zu_eq(1, ndefer_purge_calls, "Should purge, delay==0ms");
 	expect_zu_eq(HUGEPAGE, npurge_size, "Purge whole folio");
+	hpa_central_stats_t central_stats;
+	hpa_central_stats_read(
+	    tsdn, &((test_data_t *)shard)->central, &central_stats);
+	expect_u64_eq(1, central_stats.ndallocs,
+	    "The clean empty pageslab should be returned");
 	expect_zu_eq(shard->psset.stats.merged.ndirty, 1, "");
 	expect_zu_eq(shard->psset.stats.merged.nactive, HUGEPAGE_PAGES - 1, "");
 
@@ -985,6 +1050,10 @@ TEST_BEGIN(test_start_huge_purge_empty_only) {
 	/* Allocate and free 2*PAGE so that it spills into second page again */
 	edatas[0] = hpa_alloc(tsdn, shard, 2 * PAGE, PAGE, false, false,
 	    false, &deferred_work_generated);
+	hpa_central_stats_read(
+	    tsdn, &((test_data_t *)shard)->central, &central_stats);
+	expect_u64_eq(1, central_stats.nreuses,
+	    "The returned pageslab should satisfy the next grow");
 	hpa_dalloc(tsdn, shard, edatas[0], &deferred_work_generated);
 	expect_true(deferred_work_generated, "");
 	hpa_shard_do_deferred_work(tsdn, shard);
@@ -1043,8 +1112,15 @@ TEST_BEGIN(test_assume_huge_purge_fully) {
 
 	/* Stats should say no active */
 	expect_zu_eq(shard->psset.stats.merged.nactive, 0, "");
-	expect_zu_eq(
-	    shard->psset.stats.empty_slabs[0].npageslabs, 1, "Non huge");
+	expect_zu_eq(shard->psset.stats.empty_slabs[0].npageslabs, 0,
+	    "Purged empty slab should return to the central pool");
+	expect_zu_eq(shard->psset.stats.merged.npageslabs, 0,
+	    "Shard should retain no pageslabs");
+	hpa_central_stats_t central_stats;
+	hpa_central_stats_read(
+	    tsdn, &((test_data_t *)shard)->central, &central_stats);
+	expect_zu_eq(0, central_stats.nactive,
+	    "Central pool should have no checked-out pageslabs");
 	npurge_size = 0;
 	edatas[0] = hpa_alloc(tsdn, shard, PAGE, PAGE, false, false,
 	    false, &deferred_work_generated);
@@ -1495,6 +1571,96 @@ TEST_BEGIN(test_experimental_hpa_enforce_hugify) {
 }
 TEST_END
 
+TEST_BEGIN(test_return_cross_shard) {
+	test_skip_if(!hpa_supported() || !config_stats);
+
+	hpa_hooks_t hooks;
+	hooks.map = &defer_test_map;
+	hooks.unmap = &defer_test_unmap;
+	hooks.purge = &defer_test_purge;
+	hooks.hugify = &defer_test_hugify;
+	hooks.dehugify = &defer_test_dehugify;
+	hooks.curtime = &defer_test_curtime;
+	hooks.ms_since = &defer_test_ms_since;
+	hooks.vectorized_purge = &defer_vectorized_purge;
+
+	hpa_shard_opts_t opts = test_hpa_shard_opts_aggressive();
+	opts.deferral_allowed = true;
+	opts.min_purge_delay_ms = 0;
+	opts.min_purge_interval_ms = 0;
+	opts.purge_threshold = PAGE;
+	opts.hugify_style = hpa_hugify_style_lazy;
+	shared_test_data_t *test_data = create_test_data_shared(&hooks, &opts);
+	tsdn_t             *tsdn = tsd_tsdn(tsd_fetch());
+	bool                deferred_work_generated = false;
+	nstime_init(&defer_curtime, 10 * 1000 * 1000);
+
+	edata_t *a = hpa_alloc(tsdn, &test_data->shards[0], HUGEPAGE, PAGE,
+	    false, false, false, &deferred_work_generated);
+	assert_ptr_not_null(a, "Unexpected shard A allocation failure");
+	void *addr = edata_addr_get(a);
+	hpa_dalloc(tsdn, &test_data->shards[0], a, &deferred_work_generated);
+	hpa_shard_do_deferred_work(tsdn, &test_data->shards[0]);
+	expect_zu_eq(0, test_data->shards[0].psset.stats.merged.npageslabs,
+	    "Shard A should return its clean empty pageslab");
+	hpa_central_stats_t stats;
+	hpa_central_stats_read(tsdn, &test_data->central, &stats);
+	expect_u64_eq(1, stats.ndallocs, "Expected one central return");
+	uint64_t maps = stats.nchunk_maps;
+
+	edata_t *b = hpa_alloc(tsdn, &test_data->shards[1], HUGEPAGE, PAGE,
+	    false, false, false, &deferred_work_generated);
+	assert_ptr_not_null(b, "Unexpected shard B allocation failure");
+	expect_ptr_eq(
+	    addr, edata_addr_get(b), "Shard B should reuse shard A's pageslab");
+	hpa_central_stats_read(tsdn, &test_data->central, &stats);
+	expect_u64_eq(maps, stats.nchunk_maps,
+	    "Cross-shard reuse should not map another chunk");
+	expect_u64_eq(1, stats.nreuses, "Expected one cross-shard reuse");
+
+	hpa_dalloc(tsdn, &test_data->shards[1], b, &deferred_work_generated);
+	destroy_test_data_shared(test_data);
+}
+TEST_END
+
+TEST_BEGIN(test_destroy_returns_dirty) {
+	test_skip_if(!hpa_supported() || !config_stats);
+
+	hpa_hooks_t hooks;
+	hooks.map = &defer_test_map;
+	hooks.unmap = &defer_test_unmap;
+	hooks.purge = &defer_test_purge;
+	hooks.hugify = &defer_test_hugify;
+	hooks.dehugify = &defer_test_dehugify;
+	hooks.curtime = &defer_test_curtime;
+	hooks.ms_since = &defer_test_ms_since;
+	hooks.vectorized_purge = &defer_vectorized_purge;
+
+	hpa_shard_opts_t opts = test_hpa_shard_opts_default;
+	opts.deferral_allowed = true;
+	hpa_shard_t *shard = create_test_data(&hooks, &opts);
+	test_data_t *test_data = (test_data_t *)shard;
+	tsdn_t      *tsdn = tsd_tsdn(tsd_fetch());
+	bool         deferred_work_generated = false;
+	ndefer_purge_calls = 0;
+
+	edata_t *edata = hpa_alloc(tsdn, shard, PAGE, PAGE, false, false, false,
+	    &deferred_work_generated);
+	assert_ptr_not_null(edata, "Unexpected allocation failure");
+	hpa_dalloc(tsdn, shard, edata, &deferred_work_generated);
+	expect_zu_eq(0, ndefer_purge_calls,
+	    "Deferred dirty pageslab should not be purged before destroy");
+	hpa_shard_destroy(tsdn, shard);
+	expect_zu_eq(1, ndefer_purge_calls,
+	    "Destroy should purge the dirty pageslab exactly once");
+	hpa_central_stats_t stats;
+	hpa_central_stats_read(tsdn, &test_data->central, &stats);
+	expect_u64_eq(
+	    1, stats.ndalloc_purges, "Destroy-time purge should be counted");
+	destroy_test_data(shard);
+}
+TEST_END
+
 int
 main(void) {
 	/*
@@ -1518,5 +1684,6 @@ main(void) {
 	    test_delay_when_not_allowed_deferral, test_deferred_until_time,
 	    test_eager_no_hugify_on_threshold,
 	    test_hpa_hugify_style_none_huge_no_syscall,
-	    test_experimental_hpa_enforce_hugify);
+	    test_experimental_hpa_enforce_hugify, test_return_cross_shard,
+	    test_destroy_returns_dirty);
 }

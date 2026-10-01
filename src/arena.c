@@ -1705,6 +1705,36 @@ arena_boot(sc_data_t *sc_data, base_t *base, bool hpa) {
 }
 
 void
+arena_hpa_central_stats_read(tsdn_t *tsdn, hpa_central_stats_t *stats) {
+	if (!opt_hpa) {
+		memset(stats, 0, sizeof(*stats));
+		return;
+	}
+	hpa_central_stats_read(tsdn, &arena_pa_central_global.hpa, stats);
+}
+
+void
+arena_hpa_central_prefork(tsdn_t *tsdn) {
+	if (opt_hpa) {
+		hpa_central_prefork(tsdn, &arena_pa_central_global.hpa);
+	}
+}
+
+void
+arena_hpa_central_postfork_parent(tsdn_t *tsdn) {
+	if (opt_hpa) {
+		hpa_central_postfork_parent(tsdn, &arena_pa_central_global.hpa);
+	}
+}
+
+void
+arena_hpa_central_postfork_child(tsdn_t *tsdn) {
+	if (opt_hpa) {
+		hpa_central_postfork_child(tsdn, &arena_pa_central_global.hpa);
+	}
+}
+
+void
 arena_prefork0(tsdn_t *tsdn, arena_t *arena) {
 	pa_shard_prefork0(tsdn, &arena->pa_shard);
 }
