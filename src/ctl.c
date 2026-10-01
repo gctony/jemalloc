@@ -387,6 +387,16 @@ CTL_PROTO(stats_arenas_i_pac_sec_dalloc_noflush)
 INDEX_PROTO(stats_arenas_i)
 CTL_PROTO(stats_allocated)
 CTL_PROTO(stats_active)
+CTL_PROTO(stats_hpa_central_nchunks)
+CTL_PROTO(stats_hpa_central_nspare)
+CTL_PROTO(stats_hpa_central_nactive)
+CTL_PROTO(stats_hpa_central_nfree)
+CTL_PROTO(stats_hpa_central_nchunk_maps)
+CTL_PROTO(stats_hpa_central_nchunk_unmaps)
+CTL_PROTO(stats_hpa_central_nextracts)
+CTL_PROTO(stats_hpa_central_nreuses)
+CTL_PROTO(stats_hpa_central_ndallocs)
+CTL_PROTO(stats_hpa_central_ndalloc_purges)
 CTL_PROTO(stats_background_thread_num_threads)
 CTL_PROTO(stats_background_thread_num_runs)
 CTL_PROTO(stats_background_thread_run_interval)
@@ -905,6 +915,18 @@ static const ctl_named_node_t stats_background_thread_node[] = {
     {NAME("num_runs"), CTL(stats_background_thread_num_runs)},
     {NAME("run_interval"), CTL(stats_background_thread_run_interval)}};
 
+static const ctl_named_node_t stats_hpa_central_node[] = {
+    {NAME("nchunks"), CTL(stats_hpa_central_nchunks)},
+    {NAME("nspare"), CTL(stats_hpa_central_nspare)},
+    {NAME("nactive"), CTL(stats_hpa_central_nactive)},
+    {NAME("nfree"), CTL(stats_hpa_central_nfree)},
+    {NAME("nchunk_maps"), CTL(stats_hpa_central_nchunk_maps)},
+    {NAME("nchunk_unmaps"), CTL(stats_hpa_central_nchunk_unmaps)},
+    {NAME("nextracts"), CTL(stats_hpa_central_nextracts)},
+    {NAME("nreuses"), CTL(stats_hpa_central_nreuses)},
+    {NAME("ndallocs"), CTL(stats_hpa_central_ndallocs)},
+    {NAME("ndalloc_purges"), CTL(stats_hpa_central_ndalloc_purges)}};
+
 #define OP(mtx) MUTEX_PROF_DATA_NODE(mutexes_##mtx)
 MUTEX_PROF_GLOBAL_MUTEXES
 #undef OP
@@ -931,6 +953,7 @@ static const ctl_named_node_t stats_node[] = {
     {NAME("mapped"), CTL(stats_mapped)},
     {NAME("retained"), CTL(stats_retained)},
     {NAME("pinned"), CTL(stats_pinned)},
+    {NAME("hpa_central"), CHILD(named, stats_hpa_central)},
     {NAME("background_thread"), CHILD(named, stats_background_thread)},
     {NAME("mutexes"), CHILD(named, stats_mutexes)},
     {NAME("arenas"), CHILD(indexed, stats_arenas)},
@@ -1182,7 +1205,15 @@ ctl_arena_stats_sdmerge(
 	} else {
 		assert(ctl_arena->nthreads == 0);
 		assert(ctl_arena->pactive == 0);
-		assert(ctl_arena->pdirty == 0);
+		/*
+		 * HPA pageslabs are drained by arena_destroy(), just after this
+		 * snapshot.  The PAC caches have already been purged, so any dirty
+		 * pages that remain must belong to the HPA shard.
+		 */
+		assert(!config_stats
+		    || ctl_arena->pdirty
+		        == ctl_arena->astats->hpastats.psset_stats.merged
+		            .ndirty);
 		assert(ctl_arena->pmuzzy == 0);
 	}
 
@@ -1466,6 +1497,7 @@ ctl_refresh(tsdn_t *tsdn) {
 		                          .pac_stats.retained;
 		ctl_stats->pinned = ctl_sarena->astats->astats.pa_shard_stats
 		                        .pac_stats.pinned;
+		arena_hpa_central_stats_read(tsdn, &ctl_stats->hpa_central);
 
 		ctl_background_thread_stats_read(tsdn);
 
@@ -3729,6 +3761,27 @@ CTL_RO_CGEN(config_stats, stats_resident, ctl_stats->resident, size_t)
 CTL_RO_CGEN(config_stats, stats_mapped, ctl_stats->mapped, size_t)
 CTL_RO_CGEN(config_stats, stats_retained, ctl_stats->retained, size_t)
 CTL_RO_CGEN(config_stats, stats_pinned, ctl_stats->pinned, size_t)
+
+CTL_RO_CGEN(config_stats, stats_hpa_central_nchunks,
+    ctl_stats->hpa_central.nchunks, size_t)
+CTL_RO_CGEN(config_stats, stats_hpa_central_nspare,
+    ctl_stats->hpa_central.nspare, size_t)
+CTL_RO_CGEN(config_stats, stats_hpa_central_nactive,
+    ctl_stats->hpa_central.nactive, size_t)
+CTL_RO_CGEN(
+    config_stats, stats_hpa_central_nfree, ctl_stats->hpa_central.nfree, size_t)
+CTL_RO_CGEN(config_stats, stats_hpa_central_nchunk_maps,
+    ctl_stats->hpa_central.nchunk_maps, uint64_t)
+CTL_RO_CGEN(config_stats, stats_hpa_central_nchunk_unmaps,
+    ctl_stats->hpa_central.nchunk_unmaps, uint64_t)
+CTL_RO_CGEN(config_stats, stats_hpa_central_nextracts,
+    ctl_stats->hpa_central.nextracts, uint64_t)
+CTL_RO_CGEN(config_stats, stats_hpa_central_nreuses,
+    ctl_stats->hpa_central.nreuses, uint64_t)
+CTL_RO_CGEN(config_stats, stats_hpa_central_ndallocs,
+    ctl_stats->hpa_central.ndallocs, uint64_t)
+CTL_RO_CGEN(config_stats, stats_hpa_central_ndalloc_purges,
+    ctl_stats->hpa_central.ndalloc_purges, uint64_t)
 
 CTL_RO_CGEN(config_stats, stats_background_thread_num_threads,
     ctl_stats->background_thread.num_threads, size_t)
